@@ -33,14 +33,17 @@ Windows Credential Manager, or an in-app setup dialog.
 
 Verified from public sources; a **day-1 spike must confirm them** (see §10).
 
+Measured on a real installation by the `IBKR Desktop probe` workflow (full detail in
+`docs/ibkr-app-notes.md`).
+
 | Fact | Consequence |
 |---|---|
-| Install dir `C:\Program Files\IBKR Desktop` or `C:\ntws`; launcher **`ntws.exe`** (exe4j/install4j wrapper around a bundled 32-bit Zulu JVM), `ntws.vmoptions` next to it | Resolve path from registry uninstall keys, not hardcoded; expect child `java.exe` processes → kill the **process tree** |
-| No documented CLI/config for credentials, no public automation API | Credentials must be *injected into the UI*, not passed as argv. Needs a discovery spike |
-| Java UI; Java Access Bridge exposure is partial | UIA may see only a top-level window → keep an `SendInput` keyboard fallback |
-| Login frequently requires 2FA/security-code | Auto-login can only ever reach "awaiting 2FA"; a human must finish. GUI must show this explicitly |
-| App self-updates and renames things between versions | All window/element matching must be config-driven and fail soft, never crash the manager |
-| IBC (TWS automation) precedent: launch JVM with creds as `-D` props + hook the login frame | Worth probing first on IBKR Desktop; if it works it beats UI typing |
+| Installer is install4j; `-q -dir C:\ntws -overwrite` installs unattended; registry `DisplayName="IBKR Desktop"`, `InstallLocation="C:\ntws"`, version `latest (4.0d) …` | Resolve from the registry uninstall keys; CI can install the real app |
+| Launcher **`ntws.exe`**, 64-bit, runs the app in-process (no `java.exe` child) | Kill the process **tree** anyway — the app spawns helpers |
+| The UI is **Qt 6.8 QML + CEF**, window class `Qt683QWindowIcon`, and the top-level title is **always `IBKR Desktop`** | Title-based classification can never distinguish login from logged-in; use accessibility content |
+| UIA exposes `QApplication.launcherLoginWindow` with two `TextField_QMLTYPE_74` edits and a `Log In` button, and `ValuePattern.SetValue` works on both fields | UIA is the primary login driver: deterministic, no focus/tab-order, works without an input desktop |
+| Login frequently requires 2FA/security-code | Auto-login stops at "awaiting 2FA"; a human finishes. GUI must say so |
+| App self-updates and renames QML objects between versions | All matching is profile-driven and fail-soft; the probe workflow turns red when ids change |
 
 ---
 
@@ -306,7 +309,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.1.0)
+## 11. Implementation status (v0.1.1)
 
 What shipped, and where it lives:
 
@@ -318,13 +321,15 @@ What shipped, and where it lives:
 | Install discovery | `Platform.Windows/WindowsAppLocator.cs` + `UninstallRegistry.cs` |
 | Process lifecycle + job object | `Platform.Windows/Win32ProcessController.cs`, `JobObject.cs` |
 | Credential Manager + env export | `Platform.Windows/WindowsCredentialStore.cs`, `WindowsUserEnvironment.cs` |
-| Login driver | `Platform.Windows/SendInputLoginDriver.cs` (`sendinput`), `Core/ManualLoginDriver.cs` |
+| Login drivers | `Platform.Windows/UiaLoginDriver.cs` (`uia`, primary) → `SendInputLoginDriver.cs` (`sendinput`, fallback) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
+| Login-state classification | `Core/UiAutomation.cs` (`UiClassifier`, accessibility first, title second) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 109 xUnit tests, including headless Skia renders of all three windows and a Windows integration suite that drives a stub app through the real platform layer |
+| Tests | 131 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
-Deliberate v0.1.0 gaps (also listed in `docs/ibkr-app-notes.md`): UIA and JVM-property login
-drivers, tray icon, start-with-Windows, auto-update, macOS. The `ILoginDriver`, `IAppLocator`,
+Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,
+auto-update, macOS, and exact 2FA/logged-in automation ids (unknown until someone logs in with a
+real account). The `ILoginDriver`, `IAppLocator`,
 `IProcessController`, `ICredentialStore` and `IPlatformRuntime` seams are what those need.
 
 ### What CI can and cannot prove

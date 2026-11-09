@@ -54,15 +54,20 @@ Pressing **Auto Login**:
 1. refuses to run if either value is missing, with an inline error such as
    `Auto Login blocked: IBKR_PASSWORD is not set` — nothing is launched in that case;
 2. launches IBKR Desktop if it is not already running and waits for the login window;
-3. focuses the window, selects and clears the username field, types the username, presses `Tab`,
-   types the password, presses `Enter`;
-4. watches the window title and reports either *Awaiting 2FA*, *Logged in*, or a failure.
+3. **fills the form through UI Automation** — it finds the `launcherLoginWindow` root, sets the
+   username and password fields with `ValuePattern`, then invokes the `Log In` button;
+   if accessibility exposes nothing usable it falls back to focusing the window and typing
+   (select-all, username, `Tab`, password, `Enter`);
+4. waits for the login form to disappear and reports *Awaiting 2FA*, or a failure.
 
-It is **UI typing**, not an API. Consequences:
+It is UI automation, not an IBKR API. Consequences:
 
-- The field order is assumed to be *username → Tab → password*. If a future IBKR Desktop release
-  changes the tab order, set the login driver to `manual` in Settings until the profile is updated
-  (see [ibkr-app-notes.md](ibkr-app-notes.md)).
+- IBKR Desktop is a Qt/QML app with a constant window title (`IBKR Desktop`), so the manager detects
+  the login screen by its QML automation ids (`QApplication.launcherLoginWindow`) rather than by the
+  title. If a future release renames those objects, auto-login degrades to `manual` and the
+  `IBKR Desktop probe` workflow turns red (see [ibkr-app-notes.md](ibkr-app-notes.md)).
+- Setting values does not need focus, but the fallback typing path does — don't click into another
+  window while it runs.
 - It types into whatever has focus after the manager brings the window forward — do not click into
   another window while it runs.
 - It never solves 2FA and never retries credentials (retrying is how accounts get locked).
@@ -99,7 +104,8 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | "IBKR Desktop is not installed" | Install it, or set the executable override in Settings |
 | `Auto Login blocked: … is not set` | Add the value in Credentials, or set the env var and restart the manager |
 | Auto Login reports "login window is still showing" | Wrong credentials, extra dialog on screen, or the app changed its login form → try `manual` |
-| Status stays "Starting…" | The app may be showing a splash/elevation prompt; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
+| Status stays "Starting…" | The app may be showing a splash window; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
+| App shows "Error: Hardware not supported" | IBKR Desktop needs a supported GPU; the manager still starts/quits it, and UIA may still work |
 | Auto Login types into the wrong field | Tab order changed; use `manual` and report it with the log |
 | SmartScreen warning | Expected for unsigned binaries; verify the SHA-256 from `SHA256SUMS` |
 | Nothing in the tray | v0.1.0 has no tray icon; the window is the app |

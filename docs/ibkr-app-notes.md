@@ -1,71 +1,67 @@
-# IBKR Desktop notes (spike checklist)
+# IBKR Desktop notes (verified against the real app)
 
-The manager's behaviour is driven by `src/IbkrManager.Core/app-profile.json`. This file records what
-is known about the real app, what is assumed, and what to verify before trusting auto-login.
+The manager's behaviour is driven by `src/IbkrManager.Core/app-profile.json`. Everything below was
+observed by installing the real app on a Windows runner — see the `IBKR Desktop probe` workflow and
+`scripts/probe-ibkr.ps1`.
 
-## Verified from public sources
+## Verified facts
 
-| Item | Value | Source |
-|---|---|---|
-| Windows installer | `ntws-latest-standalone-windows-x64.exe` | IBKR download page |
-| Launcher executable | `ntws.exe` | community `ibkr-desktop-linux` project |
-| Runtime | Java app (bundled 32-bit Zulu JVM, exe4j-style launcher), `ntws.vmoptions` next to the exe | same |
-| Common install directories | `C:\Program Files\IBKR Desktop`, `C:\ntws` | uninstall listings, same project |
-| 2FA | Security-code prompt is normal on login | IBKR user guide (Lock and Exit / security tokens) |
-| Prior art | IBC automates TWS/Gateway by hooking the Java login frame | IBC project |
-
-## Assumed (not yet verified)
-
-- The main window title contains `Login` / `Log In` / `Sign In` at the login screen.
-- The 2FA prompt is a window/dialog whose title contains `Security Code` / `Authentication`.
-- After login the main window title contains `IBKR Desktop` or `Portfolio`.
-- The login form focuses the username field on open, and `Tab` moves to the password field.
-- `Enter` submits the form; there is no separate "I agree / connect" step before 2FA.
-- `WM_CLOSE` on the main window starts a clean shutdown, including the Java child processes.
-
-Each assumption maps to `app-profile.json` fields, so a wrong guess is a config edit — not a code
-change — except for the tab order and submit behaviour, which the SendInput driver encodes.
-
-## What is already verified, and where
-
-| Check | Verified by |
+| Item | Value |
 |---|---|
-| Registry discovery, launch, attach, window classification | `windows-latest` integration suite against the stub app |
-| Graceful `WM_CLOSE`, kill-on-timeout, process-tree cleanup | same |
-| Credential Manager and HKCU\Environment round-trip | platform tests on `windows-latest` |
-| Keystroke sequence (select-all, username, Tab, password, Enter) | platform unit tests with a faked keyboard |
-| Keystroke *delivery* to a focused control | `Category=InteractiveDesktop` test — needs an active console/RDP/self-hosted session; hosted runners are non-active service sessions and discard injected input |
-| Real IBKR window titles, focus-on-open, tab order, Enter-to-submit | **spike below** |
+| Installer | `ntws-latest-standalone-windows-x64.exe` (install4j, 208 MB) |
+| Unattended install | `installer.exe -q -dir C:\ntws -overwrite` |
+| Registry entry | `HKLM\...\Uninstall\<id>`, `DisplayName="IBKR Desktop"`, `InstallLocation="C:\ntws"`, `DisplayVersion="latest (4.0d) 20261028 22:04:17"` |
+| Launcher | `C:\ntws\ntws.exe`, a 64-bit native launcher that starts the app in-process (no separate `java.exe` child) |
+| UI stack | **Qt 6.8 QML** shell (`Qt683QWindowIcon`, `LoginWindow_QMLTYPE_137`) with embedded CEF widgets — *not* Swing |
+| Top-level window | exactly one visible window, class `Qt683QWindowIcon`, title **`IBKR Desktop` in every state** (login and logged-in) |
+| Login root | UI Automation AutomationId `QApplication.launcherLoginWindow` |
+| Login fields | two `ControlType.Edit` elements, AutomationId `QApplication.launcherLoginWindow.TextField_QMLTYPE_74` |
+| Login button | `ControlType.Button`, Name **`Log In`** |
+| Field order | first Edit = username (has keyboard focus on open), second = password; `CurrentIsPassword` is not reliably set, so the driver falls back to document order |
+| Setting values | `ValuePattern.SetValue` works on both fields (password reads back masked as `●●●…`) |
+| Installer quirk | after copying the files the wizard can keep running (it auto-launches the app); poll for `ntws.exe` instead of waiting for the installer to exit |
 
-## Spike tasks (do these on a real Windows install)
+Screenshot of the real login window: `docs/images/ibkr-desktop-login.png`. On a GPU-less CI runner
+the app also shows "Error: Hardware not supported" — the login form and its accessibility tree work
+regardless.
 
-1. **Locate**: after installing, run `IbkrDesktopManager.exe` and confirm the detected version and
-   path. Try a non-default install directory and the Settings override.
-2. **Window inventory**: with the login screen and after logging in, run
-   `Get-Process ntws,java | Select-Object Id,ProcessName,MainWindowTitle`. Record the exact titles
-   into `loginWindowTitlePatterns`, `twoFactorWindowTitlePatterns`, `loggedInWindowTitlePatterns`.
-3. **Accessibility surface**: run Accessibility Insights for Windows (or `Inspect.exe`) against the
-   login window. If the username/password `Edit` controls are exposed with AutomationIds, a UIA
-   driver is worth adding — it removes the tab-order assumption.
-4. **Tab order**: open the app, press `Tab` once, type a marker string, and see where it lands.
-   Record the correct keystroke sequence.
-5. **2FA**: log in with real credentials and capture the 2FA window title, then confirm the manager
-   reports *Awaiting 2FA* instead of *Logged in*.
-6. **Quit**: press Quit and check Task Manager — no `ntws.exe`/`java.exe` should survive; if the app
-   keeps a background updater alive, note it and extend the profile's shutdown timeout.
-7. **Elevation / UAC**: confirm no prompt appears when launching from a normal user account. If UAC
-   is required, SendInput from a non-elevated process will be blocked by design (UIPI).
-8. **Self-update**: let the app update itself and repeat 1–6; log any changed titles.
+## Why UI Automation is the primary login driver
 
-## Updating the profile
+The window title never changes, and the app is a QML/CEF shell, so there is no reliable title to
+classify and no stable "Edit" HWND to type into. Accessibility provides both:
 
-Edit `src/IbkrManager.Core/app-profile.json`, run `dotnet test`, then rebuild. The loader validates
-the file (`AppProfile.FromJson`), and `AppProfileTests` pins the default patterns, so a broken edit
-fails the build instead of the app.
+- classification: a visible `launcherLoginWindow` root or a `Log In` button means **login**;
+- injection: `ValuePattern.SetValue` for both fields, then `InvokePattern` on the `Log In` button —
+  no focus stealing, no tab order, no keyboard timing, and it works in a non-interactive session
+  where `SendInput` is discarded.
 
-## Known gaps in v0.1.0
+`SendInput` remains as a fallback when accessibility exposes nothing, and as the way to press Enter
+when the login button cannot be invoked.
 
-- Only the SendInput driver is implemented (`Native` JVM-property injection and a UIA driver are
-  planned, pending the spike above).
-- IBKR Desktop is treated as a single instance and a single account.
-- No tray icon, no start-with-Windows, no auto-update.
+## Still unverified (needs a real account)
+
+| Item | Why |
+|---|---|
+| Behaviour after valid credentials | would need live credentials; the manager stops at the 2FA prompt |
+| 2FA window automation ids | unknown, so `twoFactorAutomationIdPatterns` is empty and the manager reports "Awaiting 2FA" because the login form disappeared |
+| Logged-in layout automation ids | unknown, so `loggedInAutomationIdPatterns` is empty; absence of the login form is treated as logged-in |
+| Whether login survives sleep/autorestart | out of scope for v1 |
+
+When you run this on your own account, capture the 2FA and post-login automation ids (the probe
+script dumps whatever is on screen) and add them to `twoFactorAutomationIdPatterns` /
+`loggedInAutomationIdPatterns` — that turns the two heuristics above into exact checks.
+
+## What the probe workflow verifies on every run
+
+`IBKR Desktop probe` (manual + weekly) installs the app, launches it, and:
+
+1. asserts the production locator finds `C:\ntws\ntws.exe`;
+2. dumps all top-level windows, child windows, the UIA tree, the focused element and the
+   `ValuePattern.SetValue` result into a report + screenshot artifact;
+3. fails if the observed automation ids no longer match `loginAutomationIdPatterns`;
+4. runs the `Category=RealIbkDesktop` tests, which assert that the manager classifies the real login
+   screen as `AwaitingLogin` through UIA and that the login controls (with the `Log In` button) are
+   discoverable.
+
+That means a new IBKR Desktop release that renames its QML objects turns the workflow red instead of
+silently breaking auto-login.

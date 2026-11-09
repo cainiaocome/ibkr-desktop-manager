@@ -10,6 +10,8 @@ explicitly ask it to.
 
 ![Main window](docs/images/main-window.png)
 
+<sub>The app it manages — the real IBKR Desktop login window: `docs/images/ibkr-desktop-login.png`.</sub>
+
 ## Why
 
 IBKR Desktop has no supported way to launch and sign in from a script, and no way to see whether
@@ -94,7 +96,7 @@ started (that is the kill-on-close job object doing its job).
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 109 tests: core, platform, view models, headless UI render, Windows integration
+dotnet test                        # 131 tests: core, platform, view models, headless UI render, Windows integration
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App
 ```
@@ -104,6 +106,9 @@ dotnet run --project src/IbkrManager.App
 - `src/IbkrManager.App` — Avalonia UI (MVVM), two dialogs.
 - `src/IbkrManager.TestHost` — a WinForms stand-in for IBKR Desktop (`ibkr-testhost.exe`) used by the
   integration tests; only executed on Windows.
+- `scripts/probe-ibkr.ps1` + `.github/workflows/ibkr-probe.yml` — installs the **real** IBKR Desktop
+  (208 MB, install4j unattended), launches it, and records window/UIA facts as a report, screenshot
+  and failing assertions when the QML ids drift.
 - `tests/*` — xUnit; the UI render tests capture `docs/images/*.png` headlessly, so a XAML regression
   shows up as a diffable screenshot.
 
@@ -118,6 +123,8 @@ by the `windows-latest` CI job, which runs the manager against the stub app for 
 | Credential Manager, HKCU\Environment | skip | real Win32 round-trip | — |
 | Registry discovery, launch/attach, window classification | skip | **real integration tests** | — |
 | Graceful `WM_CLOSE` quit, process-tree kill | skip | **real integration tests** | — |
+| Login form identification (QML automation ids) | classifier unit tests | **real-app probe + tests** | — |
+| Filling the login form | UIA driver unit tests (faked session) | **real-app probe** (`ValuePattern.SetValue` verified) | — |
 | `SendInput` keystrokes reaching a focused field | sequence unit tests (faked keyboard) | not delivered¹ | **integration test** |
 
 ¹ Hosted Windows runners execute jobs in a non-active service session (`WTSConnectState` is not
@@ -129,8 +136,18 @@ dotnet test tests/IbkrManager.IntegrationTests -c Release --filter "Category=Int
 ```
 
 See [docs/design.md](docs/design.md) for the architecture, [docs/usage.md](docs/usage.md) for the user
-guide, and [docs/ibkr-app-notes.md](docs/ibkr-app-notes.md) for what still needs a real IBKR Desktop
-install to confirm.
+guide, and [docs/ibkr-app-notes.md](docs/ibkr-app-notes.md) for what was measured on a real IBKR
+Desktop installation and what still needs an account to confirm (2FA and post-login automation ids).
+
+### Probing the real app
+
+```bash
+gh workflow run ibkr-probe.yml            # installs IBKR Desktop on a Windows runner and reports
+```
+
+The workflow (also weekly) installs the app, dumps the accessibility tree/windows/screenshot, fails
+if the QML automation ids no longer match `app-profile.json`, and runs the `Category=RealIbkDesktop`
+tests.
 
 ## Releasing
 

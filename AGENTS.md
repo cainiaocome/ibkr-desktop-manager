@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 109 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 131 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -57,6 +57,25 @@ The dev box is ephemeral, so after a reset re-install:
    `python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]"`.
 
 NuGet packages restore into `~/.nuget/packages` automatically; no other system dependencies.
+
+## Probing the real app
+
+`gh workflow run ibkr-probe.yml` installs the real IBKR Desktop (install4j, `-q -dir C:\ntws
+-overwrite`) on a Windows runner, dumps windows/UIA/screenshot into artifacts, and runs the
+`Category=RealIbkDesktop` tests. Locally: `powershell.exe -File scripts/probe-ibkr.ps1`. It needs no
+credentials and never submits anything.
+
+Facts learned the hard way (do not regress them):
+
+- The app is Qt 6.8/QML + CEF, not Java/Swing, and its title is always `IBKR Desktop`. Login is
+  identified by UIA automation ids (`QApplication.launcherLoginWindow`, button `Log In`), never by
+  title. `ValuePattern.SetValue` works on both fields.
+- `Process.MainWindowHandle` is cached by .NET and goes stale when the splash window is replaced —
+  use `WindowLocator.FindMainWindow` (EnumWindows, largest visible titled window). A stale handle
+  makes UIA fail with `UIA_E_ELEMENTNOTAVAILABLE` (0x80040201).
+- Run UIA calls on an STA thread; Qt's provider misbehaves from MTA threads.
+- The install4j wizard can stay alive after copying files (it auto-launches the app): poll for
+  `ntws.exe` rather than waiting for the installer to exit.
 
 ## Conventions
 
