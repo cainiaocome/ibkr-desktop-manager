@@ -323,14 +323,22 @@ function Get-UiaTree {
 
         $current = $element.Current
         $patterns = @()
-        $patternMap = @{
-            'ValuePattern'             = [System.Windows.Automation.ValuePattern]::Pattern
-            'InvokePattern'            = [System.Windows.Automation.InvokePattern]::Pattern
-            'SelectionItemPattern'     = [System.Windows.Automation.SelectionItemPattern]::Pattern
-            'TextPattern'              = [System.Windows.Automation.TextPattern]::Pattern
-            'TogglePattern'            = [System.Windows.Automation.TogglePattern]::Pattern
-            'ExpandCollapsePattern'    = [System.Windows.Automation.ExpandCollapsePattern]::Pattern
-            'LegacyIAccessiblePattern' = [System.Windows.Automation.LegacyIAccessiblePattern]::Pattern
+        # Some pattern types are missing from .NET Framework's UIAutomationClient, so resolve each
+        # one defensively instead of letting a missing type abort the whole walk.
+        $patternMap = @{}
+        $patternTypes = @{
+            'ValuePattern'          = 'System.Windows.Automation.ValuePattern'
+            'InvokePattern'         = 'System.Windows.Automation.InvokePattern'
+            'SelectionItemPattern'  = 'System.Windows.Automation.SelectionItemPattern'
+            'TextPattern'           = 'System.Windows.Automation.TextPattern'
+            'TogglePattern'         = 'System.Windows.Automation.TogglePattern'
+            'ExpandCollapsePattern' = 'System.Windows.Automation.ExpandCollapsePattern'
+        }
+        foreach ($patternName in $patternTypes.Keys) {
+            try {
+                $patternType = [Type]::GetType($patternTypes[$patternName])
+                if ($patternType) { $patternMap[$patternName] = $patternType::Pattern }
+            } catch { }
         }
         foreach ($name in $patternMap.Keys) {
             try {
