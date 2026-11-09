@@ -141,16 +141,15 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             return;
         }
 
-        // The manager launches executables without extra arguments, so start the stub ourselves
-        // (which also exercises the attach path) and let the manager adopt the running process.
-        var host = fixture.StartHost(["--ignore-close", "--spawn-child"]);
-        var harness = fixture.CreateHarness();
+        var harness = fixture.CreateHarness(ignoreClose: true, spawnChild: true);
         try
         {
             await harness.Manager.InitializeAsync();
-            await harness.Manager.StartAsync();
+            var started = await harness.Manager.StartAsync();
 
-            var payload = TestHostFixture.ReadPayload(host.OutputPath);
+            var payload = TestHostFixture.ReadPayload(harness.OutputPath);
+            output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
+            Assert.True(IsAlive(started.ProcessId!.Value), "the stub should still be running after ignoring WM_CLOSE");
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
 
@@ -158,6 +157,7 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
 
             Assert.Equal(AppStatus.Stopped, stopped.Status);
             Assert.Contains("Terminated", stopped.LastAction);
+            Assert.False(IsAlive(started.ProcessId!.Value));
             TestHostFixture.WaitUntil(() => !IsAlive(childPid), TimeSpan.FromSeconds(10));
             Assert.False(IsAlive(childPid), "the child process should have been killed with the tree");
         }

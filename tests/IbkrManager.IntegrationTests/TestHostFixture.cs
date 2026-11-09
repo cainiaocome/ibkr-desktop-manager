@@ -57,10 +57,15 @@ public sealed class TestHostFixture : IDisposable
         SubmitAfterPassword = true,
     };
 
-    public Harness CreateHarness(string? username = null, string? password = null, params string[] extraArguments)
+    public Harness CreateHarness(
+        string? username = null,
+        string? password = null,
+        bool ignoreClose = false,
+        bool spawnChild = false)
     {
         var output = Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Guid.NewGuid().ToString("N") + ".json");
         _outputFiles.Add(output);
+        ConfigureHost(output, ignoreClose, spawnChild);
 
         var log = new RecordingLog();
         var process = new Win32ProcessController(Profile, log);
@@ -85,20 +90,23 @@ public sealed class TestHostFixture : IDisposable
             WorkingDirectory = HostDirectory,
             UseShellExecute = false,
         };
-        startInfo.ArgumentList.Add("--output");
-        startInfo.ArgumentList.Add(output);
-        foreach (var argument in extraArguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
 
         return new Harness(manager, process, log, output, startInfo, this);
+    }
+
+    /// <summary>Points the next stub process at a fresh output file and behaviour flags.</summary>
+    private static void ConfigureHost(string output, bool ignoreClose, bool spawnChild)
+    {
+        Environment.SetEnvironmentVariable("IBKR_TESTHOST_OUTPUT", output);
+        Environment.SetEnvironmentVariable("IBKR_TESTHOST_IGNORE_CLOSE", ignoreClose ? "1" : "0");
+        Environment.SetEnvironmentVariable("IBKR_TESTHOST_SPAWN_CHILD", spawnChild ? "1" : "0");
     }
 
     public HostRun StartHost(string[] extraArguments)
     {
         var output = Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Guid.NewGuid().ToString("N") + ".json");
         _outputFiles.Add(output);
+        ConfigureHost(output, ignoreClose: false, spawnChild: false);
 
         var startInfo = new ProcessStartInfo
         {

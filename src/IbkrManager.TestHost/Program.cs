@@ -28,10 +28,13 @@ internal sealed record HostOptions(
 {
     public static HostOptions Parse(string[] args)
     {
-        var output = Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Environment.ProcessId + ".json");
-        var ignoreClose = false;
-        var spawnChild = false;
-        var loggedIn = false;
+        // Environment first: the manager launches the app without arguments, but children inherit
+        // its environment, so this is the only way a manager-launched stub can be configured.
+        var output = Environment.GetEnvironmentVariable("IBKR_TESTHOST_OUTPUT")
+                     ?? Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Environment.ProcessId + ".json");
+        var ignoreClose = Environment.GetEnvironmentVariable("IBKR_TESTHOST_IGNORE_CLOSE") == "1";
+        var spawnChild = Environment.GetEnvironmentVariable("IBKR_TESTHOST_SPAWN_CHILD") == "1";
+        var loggedIn = Environment.GetEnvironmentVariable("IBKR_TESTHOST_LOGGED_IN") == "1";
 
         for (var i = 0; i < args.Length; i++)
         {

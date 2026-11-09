@@ -11,10 +11,20 @@ namespace IbkrManager.IntegrationTests;
 internal static class DesktopSession
 {
     private const uint DesktopReadObjects = 0x0001;
+    private const int WtsCurrentSession = -1;
+    private const int WtsConnectState = 8;
+    private const int WtsActive = 1;
 
     public static bool IsInteractive()
     {
         if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        // A disconnected RDP session or a service session reports WTSDisconnected/WTSIdle and
+        // silently discards injected input, so the connection state is the reliable signal.
+        if (!IsSessionActive())
         {
             return false;
         }
@@ -29,9 +39,42 @@ internal static class DesktopSession
         return true;
     }
 
+    private static bool IsSessionActive()
+    {
+        var buffer = IntPtr.Zero;
+        try
+        {
+            if (!WTSQuerySessionInformationW(IntPtr.Zero, WtsCurrentSession, WtsConnectState, out buffer, out var bytes) || bytes < 4)
+            {
+                return false;
+            }
+
+            return Marshal.ReadInt32(buffer) == WtsActive;
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                WTSFreeMemory(buffer);
+            }
+        }
+    }
+
     public static string Describe() =>
         $"session={System.Diagnostics.Process.GetCurrentProcess().SessionId}, " +
         $"interactive={IsInteractive()}, user={Environment.UserName}";
+
+    [DllImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WTSQuerySessionInformationW(
+        IntPtr server,
+        int sessionId,
+        int infoClass,
+        out IntPtr buffer,
+        out int bytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr memory);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr OpenInputDesktop(uint flags, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint access);

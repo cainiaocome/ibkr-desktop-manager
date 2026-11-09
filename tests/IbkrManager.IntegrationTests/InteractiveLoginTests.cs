@@ -31,8 +31,6 @@ public sealed class InteractiveLoginTests(TestHostFixture fixture, ITestOutputHe
             return;
         }
 
-        // Start the stub with its output path, then let the manager attach to it.
-        var host = fixture.StartHost([]);
         var harness = fixture.CreateHarness("test-user", "test-password");
         try
         {
@@ -41,9 +39,9 @@ public sealed class InteractiveLoginTests(TestHostFixture fixture, ITestOutputHe
             var state = await harness.Manager.AutoLoginAsync();
             output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
 
-            Assert.True(File.Exists(host.OutputPath),
+            Assert.True(File.Exists(harness.OutputPath),
                 "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
-            var payload = TestHostFixture.ReadPayload(host.OutputPath);
+            var payload = TestHostFixture.ReadPayload(harness.OutputPath);
             Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             Assert.Equal("test-user", payload.GetProperty("username").GetString());
             Assert.Equal("test-password", payload.GetProperty("password").GetString());
