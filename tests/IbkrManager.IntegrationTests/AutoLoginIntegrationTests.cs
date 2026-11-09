@@ -58,36 +58,6 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
     }
 
     [Fact]
-    public async Task Auto_login_types_both_fields_and_reaches_the_two_factor_prompt()
-    {
-        if (!WindowsRequired())
-        {
-            return;
-        }
-
-        var harness = fixture.CreateHarness("test-user", "test-password");
-        try
-        {
-            await harness.Manager.InitializeAsync();
-            var state = await harness.Manager.AutoLoginAsync();
-            output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
-
-            Assert.True(File.Exists(harness.OutputPath),
-                "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
-            var payload = TestHostFixture.ReadPayload(harness.OutputPath);
-            Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
-            Assert.Equal("test-user", payload.GetProperty("username").GetString());
-            Assert.Equal("test-password", payload.GetProperty("password").GetString());
-            Assert.Equal(AppStatus.AwaitingTwoFactor, state.Status);
-            Assert.Contains("2FA", state.LastAction, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            await harness.Manager.QuitAsync(force: true);
-        }
-    }
-
-    [Fact]
     public async Task Auto_login_blocks_when_no_credentials_are_configured()
     {
         if (!WindowsRequired())
@@ -171,16 +141,13 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             return;
         }
 
-        var harness = fixture.CreateHarness("test-user", "test-password", "--ignore-close", "--spawn-child");
+        var harness = fixture.CreateHarness(extraArguments: new[] { "--ignore-close", "--spawn-child" });
         try
         {
             await harness.Manager.InitializeAsync();
-            await harness.Manager.AutoLoginAsync();
+            await harness.Manager.StartAsync();
 
-            Assert.True(File.Exists(harness.OutputPath),
-                "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
             var payload = TestHostFixture.ReadPayload(harness.OutputPath);
-            Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
 

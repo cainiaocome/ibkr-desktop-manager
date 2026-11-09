@@ -122,6 +122,7 @@ internal sealed class LoginForm : Form
         base.OnShown(e);
         Activate();
         _username.Focus();
+        WritePayload(submitted: false);
     }
 
     protected override void OnActivated(EventArgs e)

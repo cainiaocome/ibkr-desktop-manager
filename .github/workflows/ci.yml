@@ -55,6 +55,19 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
 
+      - name: Interactive keyboard tests (needs a desktop session)
+        if: matrix.os == 'windows-latest' && vars.IBKR_INTERACTIVE_SESSION == 'true'
+        run: >
+          dotnet test tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj
+          -c Release --no-build --filter "Category=InteractiveDesktop"
+          --logger "trx" --results-directory TestResults/interactive
+
+      - name: Note uncovered keyboard injection
+        if: matrix.os == 'windows-latest' && vars.IBKR_INTERACTIVE_SESSION != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::notice title=Keyboard injection not covered::Hosted Windows runners are service sessions with no input desktop, so SendInput keystrokes are dropped. Everything else (registry discovery, launch/attach, window classification, graceful close, process-tree kill) is covered by the integration suite. To cover typing, run 'dotnet test -c Release --filter Category=InteractiveDesktop' on a console/RDP session or a self-hosted interactive runner."
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7

@@ -6,52 +6,66 @@ namespace IbkrManager.Platform.Windows;
 /// IBKR Desktop's Java UI reliably exposes; it is also the part most likely to need tuning after
 /// the real-app spike, hence the profile-driven timings.
 /// </summary>
-public sealed class SendInputLoginDriver(
-    IProcessController process,
-    IClock clock,
-    IAppLog log) : ILoginDriver
+public sealed class SendInputLoginDriver : ILoginDriver
 {
+    private readonly IProcessController _process;
+    private readonly IClock _clock;
+    private readonly IAppLog _log;
+    private readonly IKeyboardInput _keyboard;
+
+    public SendInputLoginDriver(
+        IProcessController process,
+        IClock clock,
+        IAppLog log,
+        IKeyboardInput? keyboard = null)
+    {
+        _process = process;
+        _clock = clock;
+        _log = log;
+        _keyboard = keyboard ?? new SendInputKeyboard();
+    }
+
     public string Name => "sendinput";
 
     public async Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!process.TryFocusMainWindow())
+        if (!_process.TryFocusMainWindow())
         {
-            log.Warn("Login: could not focus the IBKR Desktop window");
+            _log.Warn("Login: could not focus the IBKR Desktop window");
         }
 
-        log.Info($"Login: focused foreground window is '{process.MainWindowTitle}'");
+        _log.Info($"Login: focused foreground window is '{_process.MainWindowTitle}'");
 
         await Task.Delay(150, cancellationToken).ConfigureAwait(false);
 
         // Clear anything pre-filled in the username field, then type.
-        Keyboard.SendSelectAll();
-        Keyboard.SendKeyPress(NativeMethods.VK_BACK);
+        _keyboard.SendSelectAll();
+        _keyboard.SendKeyPress(NativeMethods.VK_BACK);
         if (!await TypeAsync(request.Username.Reveal(), request.Profile.TypingDelayMilliseconds, cancellationToken).ConfigureAwait(false))
         {
-            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {Keyboard.LastError})");
+            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {_keyboard.LastError})");
         }
 
         await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-        if (!Keyboard.SendKeyPress(NativeMethods.VK_TAB))
+        if (!_keyboard.SendKeyPress(NativeMethods.VK_TAB))
         {
-            return LoginResult.Failed($"Could not move focus to the password field (SendInput error {Keyboard.LastError})");
+            return LoginResult.Failed($"Could not move focus to the password field (SendInput error {_keyboard.LastError})");
         }
 
         await Task.Delay(100, cancellationToken).ConfigureAwait(false);
         if (!await TypeAsync(request.Password.Reveal(), request.Profile.TypingDelayMilliseconds, cancellationToken).ConfigureAwait(false))
         {
-            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {Keyboard.LastError})");
+            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {_keyboard.LastError})");
         }
 
-        log.Info($"Typed credentials for {request.Profile.DisplayName}; waiting for the app to react");
+        _log.Info($"Typed credentials for {request.Profile.DisplayName}; waiting for the app to react");
 
         if (request.Profile.SubmitAfterPassword)
         {
             await Task.Delay(150, cancellationToken).ConfigureAwait(false);
-            Keyboard.SendKeyPress(NativeMethods.VK_RETURN);
+            _keyboard.SendKeyPress(NativeMethods.VK_RETURN);
         }
 
         return await WaitForOutcomeAsync(request.Profile, cancellationToken).ConfigureAwait(false);
@@ -66,12 +80,12 @@ public sealed class SendInputLoginDriver(
 
         if (delayMilliseconds <= 0)
         {
-            return Keyboard.SendText(value);
+            return _keyboard.SendText(value);
         }
 
         foreach (var character in value)
         {
-            if (!Keyboard.SendText(character.ToString()))
+            if (!_keyboard.SendText(character.ToString()))
             {
                 return false;
             }
@@ -84,10 +98,10 @@ public sealed class SendInputLoginDriver(
 
     private async Task<LoginResult> WaitForOutcomeAsync(AppProfile profile, CancellationToken cancellationToken)
     {
-        var deadline = clock.UtcNow + profile.LoginResultTimeout;
-        while (clock.UtcNow < deadline)
+        var deadline = _clock.UtcNow + profile.LoginResultTimeout;
+        while (_clock.UtcNow < deadline)
         {
-            switch (profile.Classify(process.MainWindowTitle))
+            switch (profile.Classify(_process.MainWindowTitle))
             {
                 case WindowKind.TwoFactor:
                     return LoginResult.AwaitingTwoFactor(
