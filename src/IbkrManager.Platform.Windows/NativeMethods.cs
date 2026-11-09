@@ -9,7 +9,10 @@ internal static partial class NativeMethods
     public const uint WM_CLOSE = 0x0010;
     public const uint WM_SETTINGCHANGE = 0x001A;
     public const int SW_RESTORE = 9;
+    public const uint INPUT_MOUSE = 0;
     public const uint INPUT_KEYBOARD = 1;
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_UNICODE = 0x0004;
     public const ushort VK_TAB = 0x09;
@@ -167,6 +170,10 @@ internal static partial class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetCursorPos(int x, int y);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

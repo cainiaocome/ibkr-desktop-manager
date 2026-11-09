@@ -11,8 +11,8 @@ public sealed record AppSettings
 
     public string PasswordVariable { get; init; } = "IBKR_PASSWORD";
 
-    /// <summary>"sendinput" (types into the login window) or "manual" (never types).</summary>
-    public string LoginDriver { get; init; } = "sendinput";
+    /// <summary>"auto" (clicks and types into the login window) or "manual" (never types).</summary>
+    public string LoginDriver { get; init; } = "auto";
 
     public bool PersistToCredentialManager { get; init; } = true;
 
@@ -28,7 +28,9 @@ public sealed record AppSettings
     {
         UsernameVariable = string.IsNullOrWhiteSpace(UsernameVariable) ? "IBKR_USERNAME" : UsernameVariable.Trim(),
         PasswordVariable = string.IsNullOrWhiteSpace(PasswordVariable) ? "IBKR_PASSWORD" : PasswordVariable.Trim(),
-        LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "sendinput",
+        // Anything that is not "manual" means "do it automatically"; older stores wrote
+        // "sendinput" or "uia" for that.
+        LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "auto",
     };
 }
 

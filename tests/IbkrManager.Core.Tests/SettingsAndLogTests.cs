@@ -88,7 +88,7 @@ public sealed class SettingsAndLogTests
     public void AppSettings_normalize_rejects_unknown_drivers()
     {
         var normalized = new AppSettings { LoginDriver = "robots" }.Normalize();
-        Assert.Equal("sendinput", normalized.LoginDriver);
+        Assert.Equal("auto", normalized.LoginDriver);
     }
 
     [Fact]

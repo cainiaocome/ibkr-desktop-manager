@@ -10,7 +10,7 @@
   ],
   "loginWindowTitlePatterns": ["Login", "Log In", "Sign In", "Logon"],
   "twoFactorWindowTitlePatterns": ["Security Code", "Two-Factor", "Two Factor", "Authentication Code"],
-  "loggedInWindowTitlePatterns": ["IBKR Desktop", "Trader Workstation", "Portfolio"],
+  "loggedInWindowTitlePatterns": [],
   "loginAutomationIdPatterns": ["launcherLoginWindow"],
   "loginButtonNames": ["Log In"],
   "twoFactorAutomationIdPatterns": [],

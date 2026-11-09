@@ -96,6 +96,26 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
             Assert.NotNull(controls);
             output.WriteLine($"login controls: {controls}");
             Assert.True(controls!.CanSubmit, "the Log In button should be invokable");
+
+            // The pointer login driver clicks these rectangles, so they must be usable even in a
+            // session that cannot deliver input (which is exactly what a hosted runner is).
+            Assert.False(controls.UsernameBounds.IsEmpty, $"username field has no clickable rectangle: {controls.UsernameBounds}");
+            Assert.False(controls.PasswordBounds.IsEmpty, $"password field has no clickable rectangle: {controls.PasswordBounds}");
+            Assert.False(controls.SubmitBounds.IsEmpty, $"Log In button has no clickable rectangle: {controls.SubmitBounds}");
+
+            // Reading a field must work too: the driver uses it to prove the keystrokes landed.
+            Assert.NotNull(uia.GetFieldValue(controls.UsernameIndex));
+
+            // In a service session the driver must decline rather than pretend it typed something.
+            if (!InteractiveSession.IsInteractive())
+            {
+                var pointer = new PointerLoginDriver(uia, process, log);
+                var session = await pointer.LoginAsync(
+                    new LoginRequest(new Secret("probe-user"), new Secret("probe-password"), Profile));
+                output.WriteLine($"pointer driver on this session: {session}");
+                Assert.True(session.NotApplicable, "the pointer driver must not claim success without an input desktop");
+                Assert.Contains("cannot deliver", session.Message, StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {

@@ -68,7 +68,7 @@ public sealed class SettingsViewModelTests
 
         Assert.Equal("U", viewModel.UsernameVariable);
         Assert.Equal("manual", viewModel.LoginDriver);
-        Assert.Contains("sendinput", viewModel.LoginDrivers);
+        Assert.Contains("auto", viewModel.LoginDrivers);
     }
 
     [Fact]

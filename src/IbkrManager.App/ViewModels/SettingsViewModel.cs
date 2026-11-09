@@ -25,7 +25,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public event EventHandler<bool>? CloseRequested;
 
-    public IReadOnlyList<string> LoginDrivers { get; } = ["sendinput", "manual"];
+    public IReadOnlyList<string> LoginDrivers { get; } = ["auto", "manual"];
 
     public string ExecutablePath
     {
@@ -104,7 +104,7 @@ public sealed class SettingsViewModel : ViewModelBase
                 ExecutablePathOverride = string.IsNullOrEmpty(executablePath) ? null : executablePath,
                 UsernameVariable = usernameVariable,
                 PasswordVariable = passwordVariable,
-                LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "sendinput",
+                LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "auto",
                 PersistToCredentialManager = _runtime.SettingsStore.Load().PersistToCredentialManager,
                 WriteUserEnvironmentVariables = _runtime.SettingsStore.Load().WriteUserEnvironmentVariables,
                 StartWithWindows = _runtime.SettingsStore.Load().StartWithWindows,

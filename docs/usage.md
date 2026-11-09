@@ -54,11 +54,12 @@ Pressing **Auto Login**:
 1. refuses to run if either value is missing, with an inline error such as
    `Auto Login blocked: IBKR_PASSWORD is not set` — nothing is launched in that case;
 2. launches IBKR Desktop if it is not already running and waits for the login window;
-3. **fills the form through UI Automation** — it finds the `launcherLoginWindow` root, sets the
-   username and password fields with `ValuePattern`, then invokes the `Log In` button;
-   if accessibility exposes nothing usable it falls back to focusing the window and typing
-   (select-all, username, `Tab`, password, `Enter`);
-4. waits for the login form to disappear and reports *Awaiting 2FA*, or a failure.
+3. **clicks the fields and types the credentials like a person** — UI Automation supplies the screen
+   rectangles, the manager clicks the username field, replaces its contents and types, does the same
+   for the password, then clicks `Log In`;
+4. **verifies the typing landed** by reading the username field back — if the app did not receive the
+   characters, the login stops with an error instead of submitting an empty form;
+5. waits for the login form to disappear and reports *Awaiting 2FA*, or a failure.
 
 It is UI automation, not an IBKR API. Consequences:
 
@@ -66,8 +67,12 @@ It is UI automation, not an IBKR API. Consequences:
   the login screen by its QML automation ids (`QApplication.launcherLoginWindow`) rather than by the
   title. If a future release renames those objects, auto-login degrades to `manual` and the
   `IBKR Desktop probe` workflow turns red (see [ibkr-app-notes.md](ibkr-app-notes.md)).
-- Setting values does not need focus, but the fallback typing path does — don't click into another
-  window while it runs.
+- It needs an **interactive desktop**: the manager checks first, and declines with a clear message in
+  a service session or on a disconnected RDP session where Windows discards synthetic input.
+- Don't click into another window while it runs — keystrokes go to the focused control.
+- If IBKR Desktop runs **elevated** (e.g. launched by an installer as administrator), Windows blocks
+  input from a non-elevated manager. The manager then reports that the app did not receive the typed
+  username; restart both at the same privilege level.
 - It types into whatever has focus after the manager brings the window forward — do not click into
   another window while it runs.
 - It never solves 2FA and never retries credentials (retrying is how accounts get locked).
@@ -93,7 +98,7 @@ Set the login driver to `manual` to make Auto Login report "disabled in Settings
 |---|---|---|
 | Executable override | empty | full path to `ntws.exe`; wins over registry discovery |
 | Username / password variable | `IBKR_USERNAME` / `IBKR_PASSWORD` | must differ |
-| Login driver | `sendinput` | or `manual` |
+| Login driver | `auto` | or `manual` (older settings files that say `sendinput` load as `auto`) |
 
 Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain secrets.
 
@@ -104,6 +109,7 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | "IBKR Desktop is not installed" | Install it, or set the executable override in Settings |
 | `Auto Login blocked: … is not set` | Add the value in Credentials, or set the env var and restart the manager |
 | Auto Login reports "login window is still showing" | Wrong credentials, extra dialog on screen, or the app changed its login form → try `manual` |
+| "the app did not receive the typed username" | Another window took focus, a UAC prompt is in front, or the app is elevated while the manager is not. Click into the IBKR window and retry, or run both at the same privilege level |
 | Status stays "Starting…" | The app may be showing a splash window; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
 | App shows "Error: Hardware not supported" | IBKR Desktop needs a supported GPU; the manager still starts/quits it, and UIA may still work |
 | Auto Login types into the wrong field | Tab order changed; use `manual` and report it with the log |

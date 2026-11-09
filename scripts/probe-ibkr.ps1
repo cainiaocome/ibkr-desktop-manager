@@ -541,6 +541,45 @@ if (-not $mainWindow) {
     Write-Host ("Editable fields: {0}" -f (($edits | ForEach-Object { "$($_.Name)/$($_.AutomationId)" }) -join ', '))
     $summary['EditableFieldCount'] = $edits.Count
 
+    # The pointer login driver clicks fields at their reported screen rectangles, so the geometry is
+    # part of the contract: without it the manager cannot fill the form.
+    $geometry = @()
+    $geometryIndex = 0
+    foreach ($edit in $edits) {
+        $geometryIndex++
+        $rect = $null
+        $element = $script:uiaMap[$edit.Path]
+        if ($element) { try { $rect = $element.Current.BoundingRectangle } catch { $rect = $null } }
+        $geometry += [pscustomobject]@{
+            Kind = 'Edit'; Index = $geometryIndex; Name = $edit.Name; AutomationId = $edit.AutomationId
+            Left = if ($rect) { [int]$rect.Left } else { 0 }
+            Top = if ($rect) { [int]$rect.Top } else { 0 }
+            Width = if ($rect) { [int]$rect.Width } else { 0 }
+            Height = if ($rect) { [int]$rect.Height } else { 0 }
+        }
+    }
+
+    foreach ($button in @($uiaElements | Where-Object { $_.ControlType -eq 'ControlType.Button' })) {
+        $rect = $null
+        $element = $script:uiaMap[$button.Path]
+        if ($element) { try { $rect = $element.Current.BoundingRectangle } catch { $rect = $null } }
+        $geometry += [pscustomobject]@{
+            Kind = 'Button'; Index = 0; Name = $button.Name; AutomationId = $button.AutomationId
+            Left = if ($rect) { [int]$rect.Left } else { 0 }
+            Top = if ($rect) { [int]$rect.Top } else { 0 }
+            Width = if ($rect) { [int]$rect.Width } else { 0 }
+            Height = if ($rect) { [int]$rect.Height } else { 0 }
+        }
+    }
+
+    if ($geometry.Count -gt 0) {
+        Write-Host 'Control geometry (screen pixels):'
+        $geometry | Format-Table Kind, Index, Name, AutomationId, Left, Top, Width, Height -AutoSize |
+            Out-String -Width 220 | Write-Host
+    }
+
+    $summary['ControlGeometry'] = $geometry
+
     # Does the tree contain the text a login screen would show? Use it to separate "login" from
     # "logged in", since the top-level window title never changes.
     $text = ($uiaElements | ForEach-Object { "$($_.Name) $($_.AutomationId)" }) -join ' '
@@ -597,6 +636,7 @@ $match = [ordered]@{
     ContentSuggestsLogin = [bool]($summary['Hints'] -and $summary['Hints'].MentionsUsername -and $summary['Hints'].MentionsPassword)
     AutomationIds = @()
     AutomationIdMatchesProfile = $false
+    HasFieldBounds = $false
 }
 $uiaIds = @($summary['UiaSetValue'] | ForEach-Object { $_.AutomationId }) + @()
 $allIds = @($uiaElements | ForEach-Object { $_.AutomationId })
@@ -606,6 +646,8 @@ foreach ($pattern in $profile.loginAutomationIdPatterns) {
         if ($id -like "*$pattern*") { $match.AutomationIdMatchesProfile = $true; break }
     }
 }
+$clickableEdits = @($summary['ControlGeometry'] | Where-Object { $_.Kind -eq 'Edit' -and $_.Width -gt 0 -and $_.Height -gt 0 })
+$match.HasFieldBounds = ($clickableEdits.Count -ge 2)
 if ($mainWindow) {
     foreach ($pattern in $profile.LoginTitlePatterns) {
         if ($mainWindow.Title -like "*$pattern*") { $match.TitleMatchesPattern = $true; break }
@@ -645,6 +687,7 @@ $markdown += ('| Window class | `' + $classText + '` |')
 $markdown += ('| Title matches a login pattern | ' + $match.TitleMatchesPattern + ' |')
 $markdown += ('| Content suggests a login form | ' + $match.ContentSuggestsLogin + ' |')
 $markdown += ('| Automation id matches loginAutomationIdPatterns | ' + $match.AutomationIdMatchesProfile + ' |')
+$markdown += ('| Both login fields report a clickable rectangle | ' + $match.HasFieldBounds + ' |')
 $markdown += ('| UI Automation elements | ' + $summary.UiaElementCount + ' |')
 $markdown += ('| UIA editable fields | ' + $uiaCount + ' |')
 $markdown += ''
@@ -671,5 +714,11 @@ if (-not $match.AutomationIdMatchesProfile -and -not $match.ContentSuggestsLogin
     exit 3
 }
 
-Write-Host 'Probe completed: install discovery and login-screen identification verified against the real app' -ForegroundColor Green
+if (-not $match.HasFieldBounds) {
+    Write-Error ("Fewer than two editable fields reported a screen rectangle. The pointer login driver clicks " +
+        "those rectangles, so auto login cannot fill the form. Check the ControlGeometry section of the report.")
+    exit 4
+}
+
+Write-Host 'Probe completed: install discovery, login-screen identification and clickable field geometry verified against the real app' -ForegroundColor Green
 exit 0

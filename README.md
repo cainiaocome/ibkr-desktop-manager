@@ -77,7 +77,7 @@ leak into logs and crash dumps. Usernames are not secret, so both are fine there
 | Quit | `WM_CLOSE` first, then kills the process tree if it does not exit in 15 s |
 | Restart | Quit, then Start |
 | Credentials | Add / replace / clear stored credentials |
-| Settings | Executable path override, env var names, login driver (`sendinput` or `manual`) |
+| Settings | Executable path override, env var names, login driver (`auto` or `manual`) |
 | Logs | Opens `%LOCALAPPDATA%\IbkrManager\logs` |
 
 The window refreshes every 2 seconds. Closing the manager also stops the IBKR Desktop instance it
@@ -96,7 +96,7 @@ started (that is the kill-on-close job object doing its job).
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 131 tests: core, platform, view models, headless UI render, Windows integration
+dotnet test                        # 143 tests: core, platform, view models, headless UI render, Windows integration
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App
 ```
@@ -124,7 +124,8 @@ by the `windows-latest` CI job, which runs the manager against the stub app for 
 | Registry discovery, launch/attach, window classification | skip | **real integration tests** | — |
 | Graceful `WM_CLOSE` quit, process-tree kill | skip | **real integration tests** | — |
 | Login form identification (QML automation ids) | classifier unit tests | **real-app probe + tests** | — |
-| Filling the login form | UIA driver unit tests (faked session) | **real-app probe** (`ValuePattern.SetValue` verified) | — |
+| Locating the fields (rectangles) | pointer driver unit tests (faked session) | **real-app probe + tests** | — |
+| Filling the login form | pointer driver unit tests (click/type order, read-back guard) | not delivered¹ | **integration test** (stub window) |
 | `SendInput` keystrokes reaching a focused field | sequence unit tests (faked keyboard) | not delivered¹ | **integration test** |
 
 ¹ Hosted Windows runners execute jobs in a non-active service session (`WTSConnectState` is not

@@ -309,7 +309,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.1.1)
+## 11. Implementation status (v0.1.2)
 
 What shipped, and where it lives:
 
@@ -321,10 +321,10 @@ What shipped, and where it lives:
 | Install discovery | `Platform.Windows/WindowsAppLocator.cs` + `UninstallRegistry.cs` |
 | Process lifecycle + job object | `Platform.Windows/Win32ProcessController.cs`, `JobObject.cs` |
 | Credential Manager + env export | `Platform.Windows/WindowsCredentialStore.cs`, `WindowsUserEnvironment.cs` |
-| Login drivers | `Platform.Windows/UiaLoginDriver.cs` (`uia`, primary) → `SendInputLoginDriver.cs` (`sendinput`, fallback) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
+| Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-state classification | `Core/UiAutomation.cs` (`UiClassifier`, accessibility first, title second) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 131 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 143 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

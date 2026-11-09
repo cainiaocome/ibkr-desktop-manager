@@ -49,6 +49,8 @@ public sealed class TestHostFixture : IDisposable
         LoginWindowTitlePatterns = ["- Login"],
         TwoFactorWindowTitlePatterns = ["Security Code"],
         LoggedInWindowTitlePatterns = ["Portfolio"],
+        LoginAutomationIdPatterns = ["launch"],
+        LoginButtonNames = ["Sign In"],
         LaunchTimeout = TimeSpan.FromSeconds(30),
         LoginWindowTimeout = TimeSpan.FromSeconds(30),
         LoginResultTimeout = TimeSpan.FromSeconds(30),
@@ -78,6 +80,8 @@ public sealed class TestHostFixture : IDisposable
         }
 
         var driver = new SendInputLoginDriver(process, SystemClock.Instance, log);
+        var uia = new UiaSession(process, Profile, log);
+        var pointer = new PointerLoginDriver(uia, process, log);
         var locator = new OverridingAppLocator(
             new WindowsAppLocator(Profile, new UninstallRegistry()),
             () => HostPath);
@@ -91,7 +95,7 @@ public sealed class TestHostFixture : IDisposable
             UseShellExecute = false,
         };
 
-        return new Harness(manager, process, log, output, startInfo, this);
+        return new Harness(manager, process, log, output, startInfo, this, pointer, uia);
     }
 
     /// <summary>Points the next stub process at a fresh output file and behaviour flags.</summary>
@@ -220,7 +224,9 @@ public sealed record Harness(
     RecordingLog Log,
     string OutputPath,
     ProcessStartInfo StartInfo,
-    TestHostFixture Fixture)
+    TestHostFixture Fixture,
+    PointerLoginDriver PointerDriver,
+    UiaSession Uia)
 {
     public void EnsureHostStarted()
     {

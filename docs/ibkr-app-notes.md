@@ -18,12 +18,34 @@ observed by installing the real app on a Windows runner — see the `IBKR Deskto
 | Login fields | two `ControlType.Edit` elements, AutomationId `QApplication.launcherLoginWindow.TextField_QMLTYPE_74` |
 | Login button | `ControlType.Button`, Name **`Log In`** |
 | Field order | first Edit = username (has keyboard focus on open), second = password; `CurrentIsPassword` is not reliably set, so the driver falls back to document order |
-| Setting values | `ValuePattern.SetValue` works on both fields (password reads back masked as `●●●…`) |
+| Setting values | `ValuePattern.SetValue` *reports* success on both fields, but IBKR ignores it (see above) |
+| Field geometry | both edits and the `Log In` button report a clickable screen rectangle |
 | Installer quirk | after copying the files the wizard can keep running (it auto-launches the app); poll for `ntws.exe` instead of waiting for the installer to exit |
 
 Screenshot of the real login window: `docs/images/ibkr-desktop-login.png`. On a GPU-less CI runner
 the app also shows "Error: Hardware not supported" — the login form and its accessibility tree work
 regardless.
+
+## Why the form must be *typed* into (not set through UI Automation)
+
+`ValuePattern.SetValue` returns success and the accessibility value reads back correctly, **but the
+app does not notice**: the QML `text` property that the form validates is only updated by real input
+events. With values set that way the fields look filled and pressing `Log In` still produces "enter
+your username and password" — the form was empty from IBKR's point of view. Setting only the
+password and typing the username by hand shows the same error, which pins the failure on `SetValue`.
+
+So the login driver **clicks each field with the mouse and types with real keystrokes**:
+
+1. `FindLoginControls` supplies the screen rectangles of the username/password edits and the `Log In`
+   button (UI Automation reports these even in a session that cannot deliver input).
+2. `SetCursorPos` + `SendInput` click the username field, `Ctrl+A`, `Backspace`, then type.
+3. The username field is read back; a mismatch aborts the login instead of submitting an empty form.
+   This is the guard that turns "looks filled" into a hard error.
+4. Same for the password field (never read back, to keep the secret out of the manager).
+5. Click the `Log In` button (or press Enter when no rectangle is available).
+
+UI Automation is still used for *identification*, which the constant title cannot provide, and
+`ValuePattern.SetValue` remains as a fallback driver for builds that do propagate it.
 
 ## Why UI Automation is the primary login driver
 
@@ -58,7 +80,8 @@ script dumps whatever is on screen) and add them to `twoFactorAutomationIdPatter
 1. asserts the production locator finds `C:\ntws\ntws.exe`;
 2. dumps all top-level windows, child windows, the UIA tree, the focused element and the
    `ValuePattern.SetValue` result into a report + screenshot artifact;
-3. fails if the observed automation ids no longer match `loginAutomationIdPatterns`;
+3. fails if the observed automation ids no longer match `loginAutomationIdPatterns`, or if either
+   login field stops reporting a clickable rectangle (the pointer driver needs them);
 4. runs the `Category=RealIbkDesktop` tests, which assert that the manager classifies the real login
    screen as `AwaitingLogin` through UIA and that the login controls (with the `Log In` button) are
    discoverable.

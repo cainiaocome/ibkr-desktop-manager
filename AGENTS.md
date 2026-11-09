@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 131 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 143 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -75,7 +75,12 @@ Facts learned the hard way (do not regress them):
 
 - The app is Qt 6.8/QML + CEF, not Java/Swing, and its title is always `IBKR Desktop`. Login is
   identified by UIA automation ids (`QApplication.launcherLoginWindow`, button `Log In`), never by
-  title. `ValuePattern.SetValue` works on both fields.
+  title.
+- `ValuePattern.SetValue` **reports success but IBKR ignores it**: the QML `text` property only
+  updates from real input events, so the form stays empty and `Log In` says "enter your username and
+  password". Never treat a successful `SetValue` (or a filled-looking field) as a working login. The
+  primary driver therefore clicks the field rectangles and types with `SendInput`, and verifies the
+  username by reading it back before submitting.
 - `Process.MainWindowHandle` is cached by .NET and goes stale when the splash window is replaced —
   use `WindowLocator.FindMainWindow` (EnumWindows, largest visible titled window). A stale handle
   makes UIA fail with `UIA_E_ELEMENTNOTAVAILABLE` (0x80040201).

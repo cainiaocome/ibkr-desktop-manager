@@ -17,7 +17,9 @@ public sealed class AppProfileTests
 
     [Theory]
     [InlineData("IBKR Desktop - Login", WindowKind.Login)]
-    [InlineData("IBKR Desktop", WindowKind.LoggedIn)]
+    // The real window is titled "IBKR Desktop" in *every* state, so the title cannot mean
+    // "logged in"; classification relies on accessibility content instead.
+    [InlineData("IBKR Desktop", WindowKind.Unknown)]
     [InlineData("IBKR Desktop Security Code", WindowKind.TwoFactor)]
     [InlineData("Something else", WindowKind.Unknown)]
     [InlineData("", WindowKind.Unknown)]

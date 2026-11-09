@@ -55,6 +55,24 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
     }
 
+    public string? GetFieldValue(int index)
+    {
+        if (!CanUse())
+        {
+            return null;
+        }
+
+        try
+        {
+            return OnSta(() => GetFieldValueCore(index));
+        }
+        catch (Exception ex) when (IsUiaFailure(ex))
+        {
+            log.Warn($"UI Automation value read failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public bool SetField(int index, string value)
     {
         if (!CanUse())
@@ -158,14 +176,39 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
             passwordIndex = usernameIndex == 0 ? 1 : 0;
         }
 
-        var canSubmit = FindAll(automation, root, UIA_ControlTypeIds.UIA_ButtonControlTypeId)
-            .Any(button => Matches(button.CurrentName, profile.LoginButtonNames));
+        var submit = FindAll(automation, root, UIA_ControlTypeIds.UIA_ButtonControlTypeId)
+            .FirstOrDefault(button => Matches(button.CurrentName, profile.LoginButtonNames));
 
         return new UiLoginControls(
             usernameIndex,
             passwordIndex,
-            canSubmit,
-            $"window='{root.CurrentName}' root='{root.CurrentAutomationId}' edits={edits.Count}");
+            submit is not null,
+            $"window='{root.CurrentName}' root='{root.CurrentAutomationId}' edits={edits.Count}" +
+            $" username={ToBounds(edits[usernameIndex])} password={ToBounds(edits[passwordIndex])}" +
+            $" submit={ToBounds(submit)}",
+            ToBounds(edits[usernameIndex]),
+            ToBounds(edits[passwordIndex]),
+            ToBounds(submit));
+    }
+
+    private string? GetFieldValueCore(int index)
+    {
+        var automation = new CUIAutomation();
+        var root = RootOf(automation);
+        if (root is null)
+        {
+            return null;
+        }
+
+        var edits = FindAll(automation, root, UIA_ControlTypeIds.UIA_EditControlTypeId);
+        if (index < 0 || index >= edits.Count)
+        {
+            return null;
+        }
+
+        return edits[index].GetCurrentPattern(UIA_PatternIds.UIA_ValuePatternId) is IUIAutomationValuePattern valuePattern
+            ? valuePattern.CurrentValue
+            : null;
     }
 
     private bool SetFieldCore(int index, string value)
@@ -289,6 +332,18 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
 
         return elements;
+    }
+
+    /// <summary>Screen rectangle of an element; empty when it is offscreen or gone.</summary>
+    private static UiBounds ToBounds(IUIAutomationElement? element)
+    {
+        if (element is null)
+        {
+            return default;
+        }
+
+        var rect = element.CurrentBoundingRectangle;
+        return new UiBounds(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
     }
 
     private static string ControlTypeName(int controlType) => controlType switch

@@ -119,6 +119,8 @@ public sealed class UiaLoginDriverTests
 
         public UiLoginControls? FindLoginControls() => Controls;
 
+        public string? GetFieldValue(int index) => null;
+
         public bool SetField(int index, string value)
         {
             if (FailField == index)
