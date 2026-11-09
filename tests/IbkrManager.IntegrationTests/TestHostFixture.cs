@@ -21,9 +21,9 @@ public sealed class TestHostFixture : IDisposable
     {
         HostDirectory = Path.Combine(AppContext.BaseDirectory, "testhost");
         HostPath = Path.Combine(HostDirectory, HostFileName);
-        IsSupported = OperatingSystem.IsWindows() && File.Exists(HostPath);
+        HostAvailable = File.Exists(HostPath);
 
-        if (!IsSupported)
+        if (!HostAvailable)
         {
             return;
         }
@@ -34,7 +34,8 @@ public sealed class TestHostFixture : IDisposable
         key.SetValue("DisplayVersion", "9.9.9");
     }
 
-    public bool IsSupported { get; }
+    /// <summary>False when the stub was not copied next to the tests (a packaging bug).</summary>
+    public bool HostAvailable { get; }
 
     public string HostDirectory { get; }
 

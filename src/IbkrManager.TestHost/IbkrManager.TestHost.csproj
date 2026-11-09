@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- Named ntws.exe so the production locator and profile treat it like the real app. -->
-    <AssemblyName>ntws</AssemblyName>
+    <AssemblyName>ibkr-testhost</AssemblyName>
     <RootNamespace>IbkrManager.TestHost</RootNamespace>
     <IsPackable>false</IsPackable>
     <!-- lets Linux/macOS CI compile the stub; it is only executed on Windows. -->
