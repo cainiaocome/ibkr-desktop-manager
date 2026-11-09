@@ -82,8 +82,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             new ManualLoginDriver(),
             Profile,
             SystemClock.Instance,
-            log,
-            inspector: uia);
+            log);
 
         report["username"] = username;
         report["passwordLength"] = password.Length;

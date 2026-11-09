@@ -22,7 +22,21 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
 
     public DateTimeOffset? StartedAt { get; set; }
 
-    public string? MainWindowTitle { get; set; }
+    private string? _mainWindowTitle;
+
+    public string? MainWindowTitle
+    {
+        get
+        {
+            TitleReads++;
+            return _mainWindowTitle;
+        }
+
+        set => _mainWindowTitle = value;
+    }
+
+    /// <summary>How often the manager asked for the window title (it should not, while idle).</summary>
+    public int TitleReads { get; private set; }
 
     public IntPtr? MainWindowHandle { get; set; }
 

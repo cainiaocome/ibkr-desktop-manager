@@ -57,8 +57,7 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
             new ManualLoginDriver(),
             Profile,
             SystemClock.Instance,
-            log,
-            inspector: uia);
+            log);
 
         try
         {
@@ -76,7 +75,7 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
 
             var observation = uia.Observe();
-            output.WriteLine($"title: '{state.WindowTitle}' status: {state.Status}");
+            output.WriteLine($"status: {state.Status} (the manager only reports the process, not the UI)");
             if (observation is not null)
             {
                 output.WriteLine($"uia ({observation.Elements.Count} elements): {observation.Describe(20)}");
@@ -89,8 +88,8 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
                 $"no element matched loginAutomationIdPatterns [{string.Join(", ", Profile.LoginAutomationIdPatterns)}]; " +
                 $"observed: {observation.Describe(20)}");
 
-            // The state machine must use the content signal, not the constant window title.
-            Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+            // The manager stays stateless: the status is derived from the process, not from the UI.
+            Assert.Equal(AppStatus.Running, state.Status);
 
             var controls = uia.FindLoginControls();
             Assert.NotNull(controls);

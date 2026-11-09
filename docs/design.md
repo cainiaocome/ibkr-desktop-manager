@@ -102,23 +102,24 @@ Key rules:
   `app-profile.json`, shipped as a resource and overridable in settings — a new app
   version becomes a config change, not a code change.
 
-### State machine
+### Status model (deliberately flat)
 
 ```
-Stopped ──Start──▶ Launching ──window up──▶ AwaitingLogin ──typed──▶ Awaiting2FA
-   ▲                    │                        │                      │
-   │                    └──── error ──▶ Failed ◀─┴──── error ───────────┤
-   └── Quit/exit ◀── Stopping ◀── Quit ── LoggedIn ◀── heuristic ────────┘
+Unknown ──▶ NotInstalled | Stopped ◀──Quit/exit── Stopping ◀──Quit── Running ◀──Start/Launch──
+                                └───────────── error ──▶ Failed
 ```
 
-Each state carries data for the UI: PID, start time, detected version, last error,
-"2FA required — finish in the app window". Transitions are driven by a 2 s poll of
-`IProcessController` (process tree + window titles), never by sleeping in the UI thread.
+`Running` means "the process exists" — not "logged in". The UI additionally shows the outcome of the
+last Auto Login (`LoginAttempt`: submitted, awaiting 2FA, or failed, with a timestamp), which is a
+record of an action, not a tracked state.
 
-Two entry paths, same states: **Start** stops at `AwaitingLogin` and leaves the human to log in;
-**Auto Login** continues past `AwaitingLogin` into credential injection and ends at `Awaiting2FA`
-(or falls back to `AwaitingLogin` + an error banner if injection fails). Nothing is ever
-injected without that explicit click.
+The 2 s poll only reads process state (`IProcessController`), never the app's window or accessibility
+tree. There is no `Launching`/`AwaitingLogin`/`Awaiting2FA`/`LoggedIn` state machine: keeping one alive
+means inspecting another process's UI on every tick, which is expensive for that process (it runs the
+UIA queries on its own UI thread) and gives the manager nothing it can act on.
+
+**Start** and **Auto Login** are commands. Auto Login waits for the login form *inside the call*, fills
+it, waits for IBKR's answer, records the outcome and returns. Nothing is injected without that click.
 
 ---
 
@@ -133,6 +134,12 @@ injected without that explicit click.
    orphaned app dies with the manager. Credentials never go into argv (visible in the process
    list) and the password is never added to the child's environment.
 4. **Wait for login window** (timeout ~120 s, configurable), by window class/title from the profile.
+
+**Design rule: the manager is stateless about the app's UI.** It knows whether the executable is
+installed and whether the process is running, and it records the outcome of the last Auto Login. It
+does *not* keep a live login/2FA/logged-in state: that needs a window inspection on every tick, which
+runs inside the app's UI thread and gave the real app a measurable slow-down (see
+`docs/ibkr-app-notes.md`). All UI inspection is scoped to the Auto Login action.
 
 **Auto Login** (only on button click) — validation first:
 
@@ -153,19 +160,18 @@ injected without that explicit click.
   4. `manual` — skip injection, tell the user to type it themselves (fallback, not default).
 - Then **wait for IBKR's verdict**: the form is replaced by "Connecting to server…", so a missing
   form is not success. The manager reports the app's own message (or its refusal dialog), a 2FA
-  screen, or a timeout. The wait takes one accessibility snapshot per second and ends as soon as the
-  form is gone.
+  screen, or a timeout. The wait takes one accessibility snapshot per second, requires the form-less
+  view to settle, and ends when the click ends.
 - **Stay out of the app's way afterwards.** Accessibility queries run inside the app's UI thread, so
-  the inspector walks the tree breadth-first with a depth/node budget, reads properties through a UIA
-  cache request, inspects only login windows deeply, and is throttled to once every 30 s once the app
-  is logged in (60 s after any slow snapshot). Without this the logged-in trading window made the app
-  unresponsive.
-5. **Stop at 2FA**: never attempt to solve it. Show "Awaiting 2FA" and keep monitoring.
+  the inspector walks the tree breadth-first with a depth/node budget and inspects only login windows
+  deeply. Nothing inspects the app between clicks.
+5. **Stop at 2FA**: never attempt to solve it. Report "awaiting 2FA" in the outcome of the click; the
+   manager does not monitor the app afterwards.
 6. **Quit**: post `WM_CLOSE` to the main window → wait 15 s → `Kill(entireProcessTree: true)`.
    Log which path was taken.
 
-Failure policy: any injection step fails → log the reason, show an error banner, drop back to
-`AwaitingLogin` so the user can finish manually. Never retry-loop credentials (lockout risk).
+Failure policy: any injection step fails → log the reason, show an error banner, leave the app alone so
+the user can finish manually. Never retry-loop credentials (lockout risk).
 
 ---
 
@@ -323,7 +329,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.1.4)
+## 11. Implementation status (v0.2.0)
 
 What shipped, and where it lives:
 
@@ -336,9 +342,9 @@ What shipped, and where it lives:
 | Process lifecycle + job object | `Platform.Windows/Win32ProcessController.cs`, `JobObject.cs` |
 | Credential Manager + env export | `Platform.Windows/WindowsCredentialStore.cs`, `WindowsUserEnvironment.cs` |
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
-| Login-state classification | `Core/UiAutomation.cs` (`UiClassifier`, accessibility first, title second) + `Platform.Windows/UiaSession.cs` |
+| Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 159 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 156 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

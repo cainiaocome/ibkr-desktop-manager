@@ -14,20 +14,6 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private readonly ILoginDriver _loginDriver;
     private readonly IClock _clock;
     private readonly IAppLog _log;
-    private readonly IWindowInspector _inspector;
-    private WindowKind? _lastKind;
-    private DateTimeOffset _nextInspection = DateTimeOffset.MinValue;
-
-    /// <summary>
-    /// Accessibility calls run inside the app's UI thread, so they are throttled exactly where they
-    /// stop being useful: once the user is logged in there is nothing to detect every two seconds.
-    /// </summary>
-    private static readonly TimeSpan LoggedInInspectionInterval = TimeSpan.FromSeconds(30);
-
-    /// <summary>Back-off applied when an inspection is slow, to keep the app responsive.</summary>
-    private static readonly TimeSpan SlowInspectionInterval = TimeSpan.FromSeconds(60);
-
-    private static readonly TimeSpan SlowInspectionThreshold = TimeSpan.FromMilliseconds(750);
     private readonly TimeSpan _pollInterval;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -37,8 +23,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private bool _failed;
     private bool _busy;
     private bool _disposed;
-    private DateTimeOffset? _launchRequestedAt;
-    private DateTimeOffset? _twoFactorSince;
+    private bool _stopping;
+    private LoginAttempt? _lastAttempt;
     private AppState _state = AppState.Initial;
 
     public AppManager(
@@ -49,7 +35,6 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         AppProfile profile,
         IClock clock,
         IAppLog log,
-        IWindowInspector? inspector = null,
         TimeSpan? pollInterval = null)
     {
         _locator = locator;
@@ -59,7 +44,6 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         Profile = profile;
         _clock = clock;
         _log = log;
-        _inspector = inspector ?? NullWindowInspector.Instance;
         _pollInterval = pollInterval ?? DefaultPollInterval;
     }
 
@@ -115,10 +99,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     public Task<AppState> StartAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Start", cancellationToken, async ct =>
         {
-            ResetInspection();
             _failed = false;
             _lastError = null;
-            _twoFactorSince = null;
 
             EnsureInstalled();
             if (_process.IsRunning)
@@ -134,10 +116,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     public Task<AppState> AutoLoginAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Auto login", cancellationToken, async ct =>
         {
-            ResetInspection();
             _failed = false;
             _lastError = null;
-            _twoFactorSince = null;
 
             var credentials = _credentials.Resolve();
             if (!credentials.IsComplete)
@@ -172,16 +152,23 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
                 new LoginRequest(credentials.Username!, credentials.Password!, Profile),
                 ct).ConfigureAwait(false);
 
+            // The attempt is recorded as an outcome, not as live state: the manager does not watch the
+            // app afterwards, so whatever happens next (2FA, rejection, success) is the user's to see.
+            _lastAttempt = new LoginAttempt(_clock.UtcNow, result.Success, result.ReachedTwoFactor, result.Message);
+
+            if (result.NotApplicable)
+            {
+                throw new AppManagerException(
+                    "Auto login failed: the login screen was not exposed. Bring IBKR Desktop to its login " +
+                    "form and try again.");
+            }
+
             if (!result.Success)
             {
                 throw new AppManagerException($"Auto login failed: {result.Message}");
             }
 
             _lastAction = result.Message;
-            if (result.ReachedTwoFactor)
-            {
-                _twoFactorSince = _clock.UtcNow;
-            }
         });
 
     public Task<AppState> QuitAsync(bool force = false, CancellationToken cancellationToken = default) =>
@@ -189,8 +176,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         {
             _failed = false;
             _lastError = null;
-            _twoFactorSince = null;
-            _launchRequestedAt = null;
+            _stopping = true;
 
             if (!_process.IsRunning)
             {
@@ -201,6 +187,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             if (force)
             {
                 await _process.KillAsync(ct).ConfigureAwait(false);
+                _stopping = false;
                 _lastAction = "Terminated the process tree";
                 _log.Warn("Force-quit IBKR Desktop");
                 return;
@@ -211,6 +198,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
 
             if (exited)
             {
+                _stopping = false;
                 _lastAction = "Closed gracefully";
                 _log.Info("IBKR Desktop closed gracefully");
                 return;
@@ -218,6 +206,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
 
             _log.Warn("IBKR Desktop did not exit after the graceful close request; terminating the process tree");
             await _process.KillAsync(ct).ConfigureAwait(false);
+            _stopping = false;
             _lastAction = "Terminated after the graceful close timed out";
         });
 
@@ -228,6 +217,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             _lastError = null;
             EnsureInstalled();
 
+            _stopping = true;
             if (_process.IsRunning)
             {
                 var requested = await _process.CloseMainWindowAsync(ct).ConfigureAwait(false);
@@ -239,13 +229,12 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
                 }
             }
 
-            _twoFactorSince = null;
             await LaunchAsync(ct).ConfigureAwait(false);
         });
 
     private async Task LaunchAsync(CancellationToken cancellationToken)
     {
-        _launchRequestedAt = _clock.UtcNow;
+        _stopping = false;
         _log.Info($"Launching {_installation!.ExecutablePath}");
         await _process.StartAsync(_installation, cancellationToken).ConfigureAwait(false);
         _lastAction = $"Launched {Profile.DisplayName}";
@@ -344,7 +333,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             Installation = installation,
             ProcessId = _process.ProcessId,
             StartedAt = _process.StartedAt,
-            WindowTitle = _process.MainWindowTitle,
+            LastAttempt = _lastAttempt,
             Credentials = _credentials.Resolve(),
             LastError = _lastError,
             LastAction = _lastAction,
@@ -354,6 +343,10 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         return _state;
     }
 
+    /// <summary>
+    /// Status is derived from facts only: installed? process running? No window inspection happens
+    /// here — the manager acts on the app through explicit commands and reports their outcome.
+    /// </summary>
     private AppStatus ComputeStatus(AppInstallation? installation)
     {
         if (installation is null)
@@ -366,66 +359,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             return _failed ? AppStatus.Failed : AppStatus.Stopped;
         }
 
-        var kind = ClassifyWindow();
-        return kind switch
-        {
-            WindowKind.LoggedIn => AppStatus.LoggedIn,
-            WindowKind.TwoFactor => AppStatus.AwaitingTwoFactor,
-            WindowKind.Login => _twoFactorSince is null ? AppStatus.AwaitingLogin : AppStatus.AwaitingTwoFactor,
-            _ => InLaunchGracePeriod() ? AppStatus.Launching : _twoFactorSince is null ? AppStatus.AwaitingLogin : AppStatus.AwaitingTwoFactor,
-        };
+        return _stopping ? AppStatus.Stopping : AppStatus.Running;
     }
-
-    /// <summary>
-    /// Accessibility first, title second: IBKR Desktop's window title never changes between the
-    /// login screen and the logged-in app.
-    /// </summary>
-    private WindowKind ClassifyWindow()
-    {
-        var now = _clock.UtcNow;
-        if (_lastKind is { } cached && now < _nextInspection)
-        {
-            return cached;
-        }
-
-        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
-        UiObservation? observation = null;
-        try
-        {
-            observation = _inspector.Observe();
-        }
-        catch (Exception ex)
-        {
-            _log.Warn($"UI Automation inspection failed: {ex.Message}");
-        }
-
-        var kind = UiClassifier.Classify(Profile, _process.MainWindowTitle, observation);
-
-        // Measured with a stopwatch: the injected clock may be frozen, but the cost is real.
-        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startedAt);
-        var interval = kind == WindowKind.LoggedIn ? LoggedInInspectionInterval : TimeSpan.Zero;
-        if (elapsed > SlowInspectionThreshold)
-        {
-            interval = SlowInspectionInterval;
-            _log.Warn(
-                $"UI Automation inspection took {elapsed.TotalMilliseconds:0} ms; pausing further inspections for " +
-                $"{interval.TotalSeconds:0} s so {Profile.DisplayName} stays responsive");
-        }
-
-        _lastKind = kind;
-        _nextInspection = _clock.UtcNow + interval;
-        return kind;
-    }
-
-    /// <summary>A new session must be inspected immediately, not served from the previous throttle window.</summary>
-    private void ResetInspection()
-    {
-        _lastKind = null;
-        _nextInspection = DateTimeOffset.MinValue;
-    }
-
-    private bool InLaunchGracePeriod() =>
-        _launchRequestedAt is { } requested && _clock.UtcNow - requested < Profile.LaunchTimeout;
 
     private void Raise(AppState state)
     {

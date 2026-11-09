@@ -45,8 +45,9 @@ public sealed class InteractiveLoginTests(TestHostFixture fixture, ITestOutputHe
             Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             Assert.Equal("test-user", payload.GetProperty("username").GetString());
             Assert.Equal("test-password", payload.GetProperty("password").GetString());
-            Assert.Equal(AppStatus.AwaitingTwoFactor, state.Status);
-            Assert.Contains("2FA", state.LastAction, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(AppStatus.Running, state.Status);
+            Assert.True(state.LastAttempt?.AwaitingTwoFactor, "the attempt should be recorded as awaiting 2FA");
+            Assert.Contains("2FA", state.LastAttempt!.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

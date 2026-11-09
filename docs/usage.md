@@ -10,7 +10,10 @@
 
 ![Main window](images/main-window.png)
 
-The window is a live view: it refreshes every 2 seconds and never blocks while a command runs.
+The window refreshes every 2 seconds (process state only, which is cheap) and never blocks while a
+command runs. **It does not track what the app is showing**: the manager reports whether the process is
+running and what your last Auto Login did, nothing more. That keeps it out of the app's way — reading
+another program's window on every tick costs that program time.
 
 ## 1. States
 
@@ -18,11 +21,11 @@ The window is a live view: it refreshes every 2 seconds and never blocks while a
 |---|---|
 | Not installed | `ntws.exe` was not found in the registry or the known folders |
 | Not running | Installed, process not running |
-| Starting… | Just launched; waiting for the window to appear (up to 2 minutes) |
-| At login screen | Window up, login form detected — log in manually or press Auto Login |
-| Awaiting 2FA | Credentials accepted; IBKR wants a security code. Finish it in the app |
-| Running | Logged in (no login window detected) |
+| Running | The process is running — whether you are at the login screen, at a 2FA prompt or inside the trading app is up to you to see in the app |
 | Stopping… / Error | Shutdown in progress, or the last command failed (see the red banner) |
+
+The **Login** row shows the outcome of the last Auto Login click (submitted, awaiting 2FA, or failed),
+with the time it happened. It is a record of an action, not a live status.
 
 ## 2. Credentials
 
@@ -60,9 +63,11 @@ Pressing **Auto Login**:
 4. **verifies the typing landed** before submitting: the username is read back, the password field
    must report characters, and the username must still be intact (which proves the password went
    into the password field rather than being appended to the username);
-5. **waits for IBKR to answer**. The login form is replaced by "Connecting to server…", so a missing
-   form is not treated as success: the manager keeps watching and reports *IBKR reported a login
-   failure* (quoting the app's message when it exposes one), *Awaiting 2FA*, or a timeout.
+5. **waits for IBKR to answer**, within that one click. The login form is replaced by "Connecting to
+   server…", so a missing form is not treated as success: the manager watches (one snapshot per second,
+   only while the click runs) and reports *IBKR reported a login failure* (quoting the app's message
+   when it exposes one), *Awaiting 2FA*, or a timeout. When the click finishes, so does the watching —
+   the window keeps a note of the outcome, and nothing polls the app afterwards.
 
 If real mouse/keyboard events are discarded — a service session, a scheduled task, or IBKR Desktop
 running elevated — the manager repeats the same clicks and keystrokes as posted window messages,

@@ -135,7 +135,7 @@ public sealed class MainWindowViewModelTests
 
         await harness.ViewModel.RefreshAsync();
 
-        Assert.Equal("At login screen", harness.ViewModel.StatusText);
+        Assert.Equal("Running", harness.ViewModel.StatusText);
         Assert.Equal(1, harness.Manager.TickCalls);
     }
 

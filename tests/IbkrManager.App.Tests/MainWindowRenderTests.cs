@@ -19,10 +19,15 @@ public sealed class MainWindowRenderTests
         {
             State = new AppState
             {
-                Status = AppStatus.AwaitingTwoFactor,
+                Status = AppStatus.Running,
                 Installation = States.Installation,
                 ProcessId = 4242,
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-12),
+                LastAttempt = new LoginAttempt(
+                    DateTimeOffset.UtcNow,
+                    Success: true,
+                    AwaitingTwoFactor: true,
+                    "Credentials submitted — enter the 2FA code in the app to finish logging in"),
                 LastAction = "Autologin typed username, waiting for password field",
                 Credentials = new ResolvedCredentials(
                     new Secret("alice"),

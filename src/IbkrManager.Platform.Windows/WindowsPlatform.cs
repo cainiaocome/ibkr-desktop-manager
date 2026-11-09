@@ -42,6 +42,8 @@ public sealed class WindowsPlatform : IPlatformRuntime
         var uia = new UiaSession(_process, Profile, Log);
         var driver = new SelectingLoginDriver(
             () => SettingsStore.Load().LoginDriver,
+            // Blind tab-order typing is deliberately not in the production chain: with no login form
+            // exposed it would type credentials into whatever happens to have focus.
             new LoginDriverChain(
                 new PointerLoginDriver(
                     uia,
@@ -49,8 +51,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
                     Log,
                     postedInput: new PostedWindowInput(_process),
                     inspector: uia),
-                new UiaLoginDriver(uia, Log),
-                new SendInputLoginDriver(_process, SystemClock.Instance, Log)),
+                new UiaLoginDriver(uia, Log)),
             new ManualLoginDriver());
 
         var locator = new OverridingAppLocator(
@@ -65,8 +66,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
             driver,
             Profile,
             SystemClock.Instance,
-            Log,
-            inspector: uia);
+            Log);
     }
 
     public IAppManager Manager { get; }

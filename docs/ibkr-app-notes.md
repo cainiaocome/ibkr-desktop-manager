@@ -129,9 +129,9 @@ script dumps whatever is on screen) and add them to `twoFactorAutomationIdPatter
    `ValuePattern.SetValue` result into a report + screenshot artifact;
 3. fails if the observed automation ids no longer match `loginAutomationIdPatterns`, or if either
    login field stops reporting a clickable rectangle (the pointer driver needs them);
-4. runs the `Category=RealIbkDesktop` tests, which assert that the manager classifies the real login
-   screen as `AwaitingLogin` through UIA and that the login controls (with the `Log In` button) are
-   discoverable.
+4. runs the `Category=RealIbkDesktop` tests, which assert that accessibility exposes the real login
+   form (root id, two fields with clickable rectangles, `Log In` button) and that the manager reports
+   the process as running without inspecting the window;
 
 That means a new IBKR Desktop release that renames its QML objects turns the workflow red instead of
 silently breaking auto-login.

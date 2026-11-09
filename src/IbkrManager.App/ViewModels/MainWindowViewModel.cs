@@ -77,14 +77,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public string LoginStateText => _state.Status switch
+    /// <summary>
+    /// What the last Auto Login did. The manager deliberately does not track the app's UI state, so
+    /// this reports the outcome of the button press rather than claiming to know where the app is now.
+    /// </summary>
+    public string LoginStateText => _state.LastAttempt switch
     {
-        AppStatus.AwaitingLogin => "At the login screen — log in manually, or press Auto Login",
-        AppStatus.AwaitingTwoFactor => "Waiting for the 2FA code — finish it in the IBKR window",
-        AppStatus.LoggedIn => "Logged in",
-        AppStatus.Launching => "Starting the app…",
-        AppStatus.Stopping => "Stopping…",
-        _ => "—",
+        null => "No auto login yet — press Auto Login after the app shows its login form",
+        { AwaitingTwoFactor: true } =>
+            $"Auto login submitted at {_state.LastAttempt.At.ToLocalTime():HH:mm:ss} — enter the 2FA code in the IBKR window",
+        { Success: true } =>
+            $"Auto login submitted at {_state.LastAttempt.At.ToLocalTime():HH:mm:ss} — check the IBKR window",
+        _ => $"Last auto login failed at {_state.LastAttempt.At.ToLocalTime():HH:mm:ss} — see the error above",
     };
 
     public string ErrorText => _transientError ?? _state.LastError ?? string.Empty;

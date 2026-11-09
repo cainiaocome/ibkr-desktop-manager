@@ -47,7 +47,7 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             var state = await harness.Manager.StartAsync();
 
             output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
-            Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+            Assert.Equal(AppStatus.Running, state.Status);
             Assert.NotNull(state.ProcessId);
             Assert.True(IsAlive(state.ProcessId!.Value));
         }

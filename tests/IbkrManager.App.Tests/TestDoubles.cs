@@ -156,7 +156,7 @@ internal static class States
 
     public static AppState Running => AppState.Initial with
     {
-        Status = AppStatus.AwaitingLogin,
+        Status = AppStatus.Running,
         Installation = Installation,
         ProcessId = 4242,
     };

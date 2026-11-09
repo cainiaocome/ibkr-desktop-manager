@@ -13,7 +13,8 @@ public sealed record AppState
 
     public DateTimeOffset? StartedAt { get; init; }
 
-    public string? WindowTitle { get; init; }
+    /// <summary>The last Auto Login the user asked for, if any. Not a live state.</summary>
+    public LoginAttempt? LastAttempt { get; init; }
 
     public ResolvedCredentials Credentials { get; init; } = ResolvedCredentials.Empty;
 
@@ -33,4 +34,13 @@ public sealed record AppState
 
     public override string ToString() =>
         $"AppState(status={Status}, pid={ProcessId}, credentials={Credentials}, busy={IsBusy})";
+}
+
+/// <summary>
+/// Outcome of one Auto Login click. Recorded so the window can report what happened, without the
+/// manager watching the app afterwards.
+/// </summary>
+public sealed record LoginAttempt(DateTimeOffset At, bool Success, bool AwaitingTwoFactor, string Message)
+{
+    public override string ToString() => $"LoginAttempt(success={Success}, twoFactor={AwaitingTwoFactor}, {Message})";
 }

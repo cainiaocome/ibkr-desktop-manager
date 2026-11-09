@@ -27,14 +27,14 @@ public sealed class AppManagerTests
     }
 
     [Fact]
-    public async Task Start_launches_the_app_and_stops_at_the_login_screen()
+    public async Task Start_launches_the_app_and_reports_running()
     {
         var harness = new Harness();
 
         var state = await harness.Manager.StartAsync();
 
         Assert.Equal(1, harness.Process.StartCount);
-        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+        Assert.Equal(AppStatus.Running, state.Status);
         Assert.Equal(4242, state.ProcessId);
         Assert.Null(state.LastError);
     }
@@ -61,7 +61,7 @@ public sealed class AppManagerTests
         var state = await harness.Manager.StartAsync();
 
         Assert.Equal(0, harness.Process.StartCount);
-        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+        Assert.Equal(AppStatus.Running, state.Status);
         Assert.Contains("attached", state.LastAction, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -91,12 +91,14 @@ public sealed class AppManagerTests
         Assert.Equal(1, harness.Driver.CallCount);
         Assert.Equal(1, harness.Process.FocusCount);
         Assert.Equal("user", harness.Driver.LastRequest!.Username.Reveal());
-        Assert.Equal(AppStatus.AwaitingTwoFactor, state.Status);
-        Assert.Contains("2fa", state.LastAction, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AppStatus.Running, state.Status);
+        Assert.NotNull(state.LastAttempt);
+        Assert.True(state.LastAttempt!.AwaitingTwoFactor);
+        Assert.Contains("2fa", state.LastAttempt.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AutoLogin_surfaces_a_driver_failure_and_keeps_the_login_state()
+    public async Task AutoLogin_surfaces_a_driver_failure_and_records_the_attempt()
     {
         var harness = new Harness(
             providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")]);
@@ -107,7 +109,9 @@ public sealed class AppManagerTests
 
         var state = await harness.Manager.AutoLoginAsync();
 
-        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+        Assert.Equal(AppStatus.Running, state.Status);
+        Assert.NotNull(state.LastAttempt);
+        Assert.False(state.LastAttempt!.Success);
         Assert.Contains("Auto login failed", state.LastError);
         Assert.Contains("still showing", state.LastError);
     }
@@ -162,101 +166,40 @@ public sealed class AppManagerTests
 
         Assert.Equal(2, harness.Process.StartCount);
         Assert.Equal(1, harness.Process.WaitForExitCount);
-        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+        Assert.Equal(AppStatus.Running, state.Status);
     }
 
     [Fact]
-    public async Task Inspector_content_overrides_the_constant_window_title()
+    public async Task Tick_only_reads_process_state_and_never_the_window()
     {
-        var harness = new Harness();
-        harness.Process.IsRunning = true;
-        harness.Process.HasVisibleWindow = true;
-        // The real app always reports this title, including on the login screen.
-        harness.Process.MainWindowTitle = "IBKR Desktop";
-        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
-        [
-            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
-            new UiElementInfo("Button", "Log In", "QApplication.launcherLoginWindow.Button", false),
-        ]);
-
-        var state = await harness.Manager.TickAsync();
-
-        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
-    }
-
-    [Fact]
-    public async Task Inspection_is_throttled_once_the_app_is_logged_in()
-    {
-        // Accessibility calls run inside the app's UI thread; a logged-in trading window is far too
-        // large to traverse on every GUI tick (this is what made the app unresponsive).
-        var harness = new Harness();
-        harness.Process.IsRunning = true;
-        harness.Process.HasVisibleWindow = true;
-        harness.Process.MainWindowTitle = "IBKR Desktop";
-        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
-        [
-            new UiElementInfo("Window", "IBKR Desktop", "QApplication.mainWindow", false),
-            new UiElementInfo("Pane", "", "positions", false),
-            new UiElementInfo("Pane", "", "orders", false),
-        ]);
-
-        var first = await harness.Manager.TickAsync();
-        var second = await harness.Manager.TickAsync();
-        var third = await harness.Manager.TickAsync();
-
-        Assert.Equal(AppStatus.LoggedIn, first.Status);
-        Assert.Equal(AppStatus.LoggedIn, second.Status);
-        Assert.Equal(AppStatus.LoggedIn, third.Status);
-        Assert.Equal(1, harness.Inspector.Calls);
-    }
-
-    [Fact]
-    public async Task Slow_inspection_backs_off_instead_of_hammering_the_app()
-    {
-        var harness = new Harness();
-        harness.Process.IsRunning = true;
-        harness.Process.HasVisibleWindow = true;
-        harness.Process.MainWindowTitle = "IBKR Desktop";
-        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
-        [
-            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
-            new UiElementInfo("Button", "Log In", "login", false),
-        ]);
-        harness.Inspector.Delay = TimeSpan.FromMilliseconds(800);
-
-        var first = await harness.Manager.TickAsync();
-        var second = await harness.Manager.TickAsync();
-
-        Assert.Equal(AppStatus.AwaitingLogin, first.Status);
-        Assert.Equal(AppStatus.AwaitingLogin, second.Status);
-        Assert.Equal(1, harness.Inspector.Calls);
-        Assert.Contains(harness.Log.Warnings, message => message.Contains("pausing further inspections"));
-    }
-
-    [Fact]
-    public async Task Tick_detects_a_logged_in_window()
-    {
-        var harness = new Harness();
-        harness.Process.IsRunning = true;
-        harness.Process.HasVisibleWindow = true;
-        harness.Process.MainWindowTitle = "IBKR Desktop Portfolio";
-
-        var state = await harness.Manager.TickAsync();
-
-        Assert.Equal(AppStatus.LoggedIn, state.Status);
-    }
-
-    [Fact]
-    public async Task Tick_reports_launching_before_the_window_appears()
-    {
+        // The manager is stateless about the app's UI: it does not inspect the window on ticks, so it
+        // cannot keep the app busy or claim to know whether the user is logged in.
         var harness = new Harness();
         await harness.Manager.StartAsync();
-        harness.Process.HasVisibleWindow = false;
-        harness.Process.MainWindowTitle = null;
+        var readsAfterStart = harness.Process.TitleReads;
 
-        var state = await harness.Manager.TickAsync();
+        for (var i = 0; i < 5; i++)
+        {
+            var state = await harness.Manager.TickAsync();
+            Assert.Equal(AppStatus.Running, state.Status);
+        }
 
-        Assert.Equal(AppStatus.Launching, state.Status);
+        Assert.Equal(readsAfterStart, harness.Process.TitleReads);
+    }
+
+    [Fact]
+    public async Task AutoLogin_explains_a_missing_login_screen()
+    {
+        var harness = new Harness(
+            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")]);
+        harness.Process.IsRunning = true;
+        harness.Process.HasVisibleWindow = true;
+        harness.Driver.Result = LoginResult.DoesNotApply("no login form was exposed through UI Automation");
+
+        var state = await harness.Manager.AutoLoginAsync();
+
+        Assert.Contains("login screen", state.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AppStatus.Running, state.Status);
     }
 
     [Fact]
@@ -268,7 +211,7 @@ public sealed class AppManagerTests
 
         await harness.Manager.StartAsync();
 
-        Assert.Contains(AppStatus.AwaitingLogin, observed);
+        Assert.Contains(AppStatus.Running, observed);
     }
 
     [Fact]
@@ -281,7 +224,7 @@ public sealed class AppManagerTests
         var tick = harness.Manager.TickAsync();
 
         await Task.WhenAll(start, tick);
-        Assert.Equal(AppStatus.AwaitingLogin, (await tick).Status);
+        Assert.Equal(AppStatus.Running, (await tick).Status);
     }
 
     private sealed class Harness
@@ -306,8 +249,7 @@ public sealed class AppManagerTests
                 driver ?? Driver,
                 TestProfile.Fast,
                 Clock,
-                Log,
-                inspector: Inspector);
+                Log);
         }
 
         public AppInstallation? Installation { get; }
@@ -321,8 +263,6 @@ public sealed class AppManagerTests
         public CredentialResolver Resolver { get; }
 
         public RecordingLog Log { get; }
-
-        public FakeInspector Inspector { get; } = new();
 
         public AppManager Manager { get; }
     }
