@@ -4,49 +4,33 @@ using Interop.UIAutomationClient;
 namespace IbkrManager.Platform.Windows;
 
 /// <summary>
-/// Thin UI Automation client over <c>UIAutomationCore</c>. IBKR Desktop is a Qt/QML app whose
-/// login form is exposed with automation ids such as
-/// <c>QApplication.launcherLoginWindow.TextField_QMLTYPE_74</c>, and whose window title never
-/// changes, so accessibility is the only reliable way to tell login from logged-in.
+/// UI Automation client for IBKR Desktop. The app is a Qt 6.8/QML desktop shell (with CEF
+/// widgets) whose login form is exposed with automation ids such as
+/// <c>QApplication.launcherLoginWindow.TextField_QMLTYPE_74</c>, and whose window title is the
+/// constant "IBKR Desktop" in every state. Accessibility is therefore the only reliable way to
+/// tell the login screen from the logged-in app — and the only deterministic way to fill it.
 ///
-/// A <c>CUIAutomation</c> instance is created per operation: it is cheap, and it avoids COM
-/// apartment affinity problems when the manager calls from the UI thread and from thread-pool
-/// continuations.
+/// All UIA calls are marshalled onto a dedicated STA thread: Qt's in-process provider answers
+/// UIA_E_ELEMENTNOTAVAILABLE when a client calls from an MTA thread (test runners and
+/// thread-pool continuations).
 /// </summary>
 public sealed class UiaSession(IProcessController process, AppProfile profile, IAppLog log) : IUiLoginUi, IWindowInspector
 {
-    private const int EditControlType = UIA_ControlTypeIds.UIA_EditControlTypeId;
-    private const int ButtonControlType = UIA_ControlTypeIds.UIA_ButtonControlTypeId;
-    private const int ValuePatternId = UIA_PatternIds.UIA_ValuePatternId;
-    private const int InvokePatternId = UIA_PatternIds.UIA_InvokePatternId;
     private const int MaxElements = 128;
+    private static readonly TimeSpan StaTimeout = TimeSpan.FromSeconds(20);
 
     public UiObservation? Observe()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return null;
-        }
-
-        var window = process.MainWindowHandle;
-        if (window is null || window.Value == IntPtr.Zero)
+        if (!CanUse())
         {
             return null;
         }
 
         try
         {
-            var automation = new CUIAutomation();
-            var root = automation.ElementFromHandle(window.Value);
-            if (root is null)
-            {
-                return null;
-            }
-
-            var elements = ReadTree(root);
-            return new UiObservation(root.CurrentName, elements);
+            return OnSta(ObserveCore);
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException)
+        catch (Exception ex) when (IsUiaFailure(ex))
         {
             log.Warn($"UI Automation unavailable: {ex.Message}");
             return null;
@@ -55,60 +39,16 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
 
     public UiLoginControls? FindLoginControls()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return null;
-        }
-
-        var window = process.MainWindowHandle;
-        if (window is null || window.Value == IntPtr.Zero)
+        if (!CanUse())
         {
             return null;
         }
 
         try
         {
-            var automation = new CUIAutomation();
-            var root = automation.ElementFromHandle(window.Value);
-            if (root is null || !LooksLikeLogin(root))
-            {
-                return null;
-            }
-
-            var edits = FindAll(root, EditControlType);
-            if (edits.Count == 0)
-            {
-                return null;
-            }
-
-            var passwordIndex = edits.FindIndex(element => element.CurrentIsPassword != 0);
-            var usernameIndex = edits.FindIndex(element => element.CurrentIsPassword == 0);
-            if (usernameIndex < 0)
-            {
-                usernameIndex = 0;
-            }
-
-            if (passwordIndex < 0)
-            {
-                passwordIndex = usernameIndex == 0 ? Math.Min(1, edits.Count - 1) : 0;
-            }
-
-            if (passwordIndex == usernameIndex)
-            {
-                log.Warn("UI Automation exposed only one editable field on the login form");
-                return null;
-            }
-
-            var canSubmit = FindAll(root, ButtonControlType)
-                .Any(button => Matches(button.CurrentName, profile.LoginButtonNames));
-
-            return new UiLoginControls(
-                usernameIndex,
-                passwordIndex,
-                canSubmit,
-                $"window='{root.CurrentName}' root='{root.CurrentAutomationId}' fields={edits.Count}");
+            return OnSta(FindLoginControlsCore);
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException)
+        catch (Exception ex) when (IsUiaFailure(ex))
         {
             log.Warn($"UI Automation login lookup failed: {ex.Message}");
             return null;
@@ -117,32 +57,16 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
 
     public bool SetField(int index, string value)
     {
+        if (!CanUse())
+        {
+            return false;
+        }
+
         try
         {
-            var automation = new CUIAutomation();
-            var root = WindowRoot(automation);
-            if (root is null)
-            {
-                return false;
-            }
-
-            var edits = FindAll(root, EditControlType);
-            if (index < 0 || index >= edits.Count)
-            {
-                log.Warn($"Login field {index} does not exist ({edits.Count} editable fields)");
-                return false;
-            }
-
-            if (edits[index].GetCurrentPattern(ValuePatternId) is not IUIAutomationValuePattern valuePattern)
-            {
-                log.Warn($"Login field {index} does not support ValuePattern");
-                return false;
-            }
-
-            valuePattern.SetValue(value);
-            return true;
+            return OnSta(() => SetFieldCore(index, value));
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException)
+        catch (Exception ex) when (IsUiaFailure(ex))
         {
             log.Warn($"UI Automation SetValue failed: {ex.Message}");
             return false;
@@ -151,35 +75,16 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
 
     public bool Submit()
     {
+        if (!CanUse())
+        {
+            return false;
+        }
+
         try
         {
-            var automation = new CUIAutomation();
-            var root = WindowRoot(automation);
-            if (root is null)
-            {
-                return false;
-            }
-
-            foreach (var button in FindAll(root, ButtonControlType))
-            {
-                if (!Matches(button.CurrentName, profile.LoginButtonNames))
-                {
-                    continue;
-                }
-
-                if (button.GetCurrentPattern(InvokePatternId) is IUIAutomationInvokePattern invoke)
-                {
-                    invoke.Invoke();
-                    return true;
-                }
-            }
-
-            // No invokable button: fall back to pressing Enter in the focused field.
-            log.Info("No invokable login button; pressing Enter instead");
-            process.TryFocusMainWindow();
-            return Keyboard.SendKeyPress(NativeMethods.VK_RETURN);
+            return OnSta(SubmitCore);
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException)
+        catch (Exception ex) when (IsUiaFailure(ex))
         {
             log.Warn($"UI Automation submit failed: {ex.Message}");
             return false;
@@ -207,20 +112,130 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         return FindLoginControls() is null;
     }
 
-    private IUIAutomationElement? WindowRoot(CUIAutomation automation)
+    // ---------------------------------------------------------------- core (STA only)
+
+    private UiObservation? ObserveCore()
     {
-        var window = process.MainWindowHandle;
-        return window is null || window.Value == IntPtr.Zero ? null : automation.ElementFromHandle(window.Value);
+        var automation = new CUIAutomation();
+        var root = RootOf(automation);
+        return root is null ? null : new UiObservation(root.CurrentName, ReadTree(automation, root));
     }
 
-    private bool LooksLikeLogin(IUIAutomationElement root)
+    private UiLoginControls? FindLoginControlsCore()
     {
-        if (Matches(root.CurrentAutomationId, profile.LoginAutomationIdPatterns))
+        var automation = new CUIAutomation();
+        var root = RootOf(automation);
+        if (root is null)
         {
-            return true;
+            return null;
         }
 
-        return FindAll(root, ButtonControlType).Any(button => Matches(button.CurrentName, profile.LoginButtonNames));
+        var isLogin = Matches(root.CurrentAutomationId, profile.LoginAutomationIdPatterns)
+                      || FindAll(automation, root, UIA_ControlTypeIds.UIA_ButtonControlTypeId)
+                          .Any(button => Matches(button.CurrentName, profile.LoginButtonNames));
+        if (!isLogin)
+        {
+            return null;
+        }
+
+        var edits = FindAll(automation, root, UIA_ControlTypeIds.UIA_EditControlTypeId);
+        if (edits.Count < 2)
+        {
+            log.Warn($"Login form exposed {edits.Count} editable field(s); need at least two");
+            return null;
+        }
+
+        var passwordIndex = edits.FindIndex(element => element.CurrentIsPassword != 0);
+        var usernameIndex = edits.FindIndex(element => element.CurrentIsPassword == 0);
+        if (usernameIndex < 0)
+        {
+            usernameIndex = 0;
+        }
+
+        if (passwordIndex < 0 || passwordIndex == usernameIndex)
+        {
+            // Qt does not always flag IsPassword; fall back to document order.
+            passwordIndex = usernameIndex == 0 ? 1 : 0;
+        }
+
+        var canSubmit = FindAll(automation, root, UIA_ControlTypeIds.UIA_ButtonControlTypeId)
+            .Any(button => Matches(button.CurrentName, profile.LoginButtonNames));
+
+        return new UiLoginControls(
+            usernameIndex,
+            passwordIndex,
+            canSubmit,
+            $"window='{root.CurrentName}' root='{root.CurrentAutomationId}' edits={edits.Count}");
+    }
+
+    private bool SetFieldCore(int index, string value)
+    {
+        var automation = new CUIAutomation();
+        var root = RootOf(automation);
+        if (root is null)
+        {
+            return false;
+        }
+
+        var edits = FindAll(automation, root, UIA_ControlTypeIds.UIA_EditControlTypeId);
+        if (index < 0 || index >= edits.Count)
+        {
+            log.Warn($"Login field {index} does not exist ({edits.Count} editable fields)");
+            return false;
+        }
+
+        if (edits[index].GetCurrentPattern(UIA_PatternIds.UIA_ValuePatternId) is not IUIAutomationValuePattern valuePattern)
+        {
+            log.Warn($"Login field {index} does not support ValuePattern");
+            return false;
+        }
+
+        valuePattern.SetValue(value);
+        return true;
+    }
+
+    private bool SubmitCore()
+    {
+        var automation = new CUIAutomation();
+        var root = RootOf(automation);
+        if (root is null)
+        {
+            return false;
+        }
+
+        foreach (var button in FindAll(automation, root, UIA_ControlTypeIds.UIA_ButtonControlTypeId))
+        {
+            if (!Matches(button.CurrentName, profile.LoginButtonNames))
+            {
+                continue;
+            }
+
+            if (button.GetCurrentPattern(UIA_PatternIds.UIA_InvokePatternId) is IUIAutomationInvokePattern invoke)
+            {
+                invoke.Invoke();
+                return true;
+            }
+        }
+
+        log.Info("No invokable login button; pressing Enter instead");
+        process.TryFocusMainWindow();
+        return Keyboard.SendKeyPress(NativeMethods.VK_RETURN);
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private bool CanUse() => OperatingSystem.IsWindows() && RootHandle() != IntPtr.Zero;
+
+    private IntPtr RootHandle()
+    {
+        var handle = process.MainWindowHandle;
+        return handle is { } value && value != IntPtr.Zero ? value : IntPtr.Zero;
+    }
+
+    private IUIAutomationElement? RootOf(CUIAutomation automation)
+    {
+        var handle = RootHandle();
+        return handle == IntPtr.Zero ? null : automation.ElementFromHandle(handle);
     }
 
     private static bool Matches(string? value, IReadOnlyList<string> patterns) =>
@@ -228,9 +243,8 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         patterns.Any(pattern => !string.IsNullOrWhiteSpace(pattern) &&
                                 value.Contains(pattern, StringComparison.OrdinalIgnoreCase));
 
-    private static List<IUIAutomationElement> FindAll(IUIAutomationElement root, int controlType)
+    private static List<IUIAutomationElement> FindAll(CUIAutomation automation, IUIAutomationElement root, int controlType)
     {
-        var automation = new CUIAutomation();
         var condition = automation.CreatePropertyCondition(UIA_PropertyIds.UIA_ControlTypePropertyId, controlType);
         var found = root.FindAll(TreeScope.TreeScope_Descendants, condition);
 
@@ -247,14 +261,17 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         return result;
     }
 
-    private List<UiElementInfo> ReadTree(IUIAutomationElement root)
+    private static List<UiElementInfo> ReadTree(CUIAutomation automation, IUIAutomationElement root)
     {
         var elements = new List<UiElementInfo>
         {
-            new(ControlTypeName(root.CurrentControlType), root.CurrentName ?? string.Empty, root.CurrentAutomationId ?? string.Empty, false),
+            new(
+                ControlTypeName(root.CurrentControlType),
+                root.CurrentName ?? string.Empty,
+                root.CurrentAutomationId ?? string.Empty,
+                root.CurrentIsPassword != 0),
         };
 
-        var automation = new CUIAutomation();
         var found = root.FindAll(TreeScope.TreeScope_Descendants, automation.CreateTrueCondition());
         for (var i = 0; i < found.Length && i < MaxElements; i++)
         {
@@ -276,11 +293,52 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
 
     private static string ControlTypeName(int controlType) => controlType switch
     {
-        EditControlType => "Edit",
-        ButtonControlType => "Button",
-        50032 => "Window",
-        50003 => "ComboBox",
-        50026 => "Group",
+        UIA_ControlTypeIds.UIA_EditControlTypeId => "Edit",
+        UIA_ControlTypeIds.UIA_ButtonControlTypeId => "Button",
+        UIA_ControlTypeIds.UIA_WindowControlTypeId => "Window",
+        UIA_ControlTypeIds.UIA_ComboBoxControlTypeId => "ComboBox",
+        UIA_ControlTypeIds.UIA_GroupControlTypeId => "Group",
+        UIA_ControlTypeIds.UIA_PaneControlTypeId => "Pane",
         _ => $"Control{controlType}",
     };
+
+    private static bool IsUiaFailure(Exception ex) =>
+        ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException or TimeoutException;
+
+    private static T OnSta<T>(Func<T> action)
+    {
+        T result = default!;
+        Exception? failure = null;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = action();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "ibkr-uia",
+        };
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        if (!thread.Join(StaTimeout))
+        {
+            throw new TimeoutException("UI Automation call did not return in time");
+        }
+
+        if (failure is not null)
+        {
+            throw failure;
+        }
+
+        return result;
+    }
 }
