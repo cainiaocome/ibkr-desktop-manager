@@ -22,6 +22,8 @@ public sealed class SendInputLoginDriver(
             log.Warn("Login: could not focus the IBKR Desktop window");
         }
 
+        log.Info($"Login: focused foreground window is '{process.MainWindowTitle}'");
+
         await Task.Delay(150, cancellationToken).ConfigureAwait(false);
 
         // Clear anything pre-filled in the username field, then type.
@@ -29,19 +31,19 @@ public sealed class SendInputLoginDriver(
         Keyboard.SendKeyPress(NativeMethods.VK_BACK);
         if (!await TypeAsync(request.Username.Reveal(), request.Profile.TypingDelayMilliseconds, cancellationToken).ConfigureAwait(false))
         {
-            return LoginResult.Failed("Windows rejected the simulated keystrokes");
+            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {Keyboard.LastError})");
         }
 
         await Task.Delay(100, cancellationToken).ConfigureAwait(false);
         if (!Keyboard.SendKeyPress(NativeMethods.VK_TAB))
         {
-            return LoginResult.Failed("Could not move focus to the password field");
+            return LoginResult.Failed($"Could not move focus to the password field (SendInput error {Keyboard.LastError})");
         }
 
         await Task.Delay(100, cancellationToken).ConfigureAwait(false);
         if (!await TypeAsync(request.Password.Reveal(), request.Profile.TypingDelayMilliseconds, cancellationToken).ConfigureAwait(false))
         {
-            return LoginResult.Failed("Windows rejected the simulated keystrokes");
+            return LoginResult.Failed($"Windows rejected the simulated keystrokes (SendInput error {Keyboard.LastError})");
         }
 
         log.Info($"Typed credentials for {request.Profile.DisplayName}; waiting for the app to react");

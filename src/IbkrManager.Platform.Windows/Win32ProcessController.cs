@@ -114,8 +114,10 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         }
 
         NativeMethods.ShowWindow(handle, NativeMethods.SW_RESTORE);
+        var foregroundBefore = NativeMethods.GetForegroundWindow();
         if (NativeMethods.SetForegroundWindow(handle))
         {
+            _log.Info($"Focused window 0x{handle.ToInt64():X} (foreground was 0x{foregroundBefore.ToInt64():X})");
             return true;
         }
 
@@ -136,7 +138,12 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
 
         try
         {
-            return NativeMethods.SetForegroundWindow(handle);
+            var focused = NativeMethods.SetForegroundWindow(handle);
+            _log.Info(
+                focused
+                    ? $"Focused window 0x{handle.ToInt64():X} via AttachThreadInput (foreground was 0x{foregroundBefore.ToInt64():X})"
+                    : $"SetForegroundWindow failed for 0x{handle.ToInt64():X} (foreground 0x{foregroundBefore.ToInt64():X}, error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+            return focused;
         }
         finally
         {

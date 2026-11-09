@@ -76,9 +76,13 @@ internal static class Keyboard
         },
     };
 
+    /// <summary>Last SendInput error code, for diagnostics (0 on success).</summary>
+    public static int LastError { get; private set; }
+
     private static bool Send(NativeMethods.INPUT[] inputs)
     {
         var sent = NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
+        LastError = sent == inputs.Length ? 0 : Marshal.GetLastWin32Error();
         return sent == inputs.Length;
     }
 }

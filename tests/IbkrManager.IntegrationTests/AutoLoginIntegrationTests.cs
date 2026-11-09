@@ -72,6 +72,8 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             var state = await harness.Manager.AutoLoginAsync();
             output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
 
+            Assert.True(File.Exists(harness.OutputPath),
+                "the stub never received a submit; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
             var payload = TestHostFixture.ReadPayload(harness.OutputPath);
             Assert.Equal("test-user", payload.GetProperty("username").GetString());
             Assert.Equal("test-password", payload.GetProperty("password").GetString());
@@ -174,6 +176,8 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             await harness.Manager.InitializeAsync();
             await harness.Manager.AutoLoginAsync();
 
+            Assert.True(File.Exists(harness.OutputPath),
+                "the stub never received a submit; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
             var payload = TestHostFixture.ReadPayload(harness.OutputPath);
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
