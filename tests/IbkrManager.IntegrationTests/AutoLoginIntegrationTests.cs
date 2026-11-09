@@ -141,13 +141,16 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             return;
         }
 
-        var harness = fixture.CreateHarness(extraArguments: new[] { "--ignore-close", "--spawn-child" });
+        // The manager launches executables without extra arguments, so start the stub ourselves
+        // (which also exercises the attach path) and let the manager adopt the running process.
+        var host = fixture.StartHost(["--ignore-close", "--spawn-child"]);
+        var harness = fixture.CreateHarness();
         try
         {
             await harness.Manager.InitializeAsync();
             await harness.Manager.StartAsync();
 
-            var payload = TestHostFixture.ReadPayload(harness.OutputPath);
+            var payload = TestHostFixture.ReadPayload(host.OutputPath);
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
 

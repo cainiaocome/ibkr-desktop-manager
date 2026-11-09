@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 95 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 109 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -18,7 +18,18 @@ dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
 Everything except the Win32 calls builds and tests on Linux — the platform layer is guarded with
 `OperatingSystem.IsWindows()` and `[SupportedOSPlatform("windows")]`. Windows-only tests self-skip.
 CI runs the suite on `windows-latest` and `ubuntu-latest`; trust CI (or a real Windows box) for
-anything touching processes, registry, Credential Manager or SendInput.
+anything touching processes, registry or Credential Manager.
+
+`tests/IbkrManager.IntegrationTests` drives a stub app (`src/IbkrManager.TestHost`, WinForms,
+`ibkr-testhost.exe`) through the real platform layer on Windows: registry discovery, launch/attach,
+window classification, graceful close and process-tree kill.
+
+**Hosted Windows runners are service sessions**: windows can be created and focused but there is no
+input desktop, so `SendInput` keystrokes are silently dropped. The keystroke *sequence* is unit-tested
+with a faked `IKeyboardInput`; actual delivery is covered by
+`dotnet test --filter "Category=InteractiveDesktop"`, which only does something on a console/RDP or
+self-hosted interactive runner. Do not "fix" a skipped typing test by weakening it — verify the
+session with `DesktopSession.IsInteractive()` first.
 
 ## Bootstrapping a fresh (Linux) machine
 

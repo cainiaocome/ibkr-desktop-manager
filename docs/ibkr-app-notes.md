@@ -26,6 +26,17 @@ is known about the real app, what is assumed, and what to verify before trusting
 Each assumption maps to `app-profile.json` fields, so a wrong guess is a config edit — not a code
 change — except for the tab order and submit behaviour, which the SendInput driver encodes.
 
+## What is already verified, and where
+
+| Check | Verified by |
+|---|---|
+| Registry discovery, launch, attach, window classification | `windows-latest` integration suite against the stub app |
+| Graceful `WM_CLOSE`, kill-on-timeout, process-tree cleanup | same |
+| Credential Manager and HKCU\Environment round-trip | platform tests on `windows-latest` |
+| Keystroke sequence (select-all, username, Tab, password, Enter) | platform unit tests with a faked keyboard |
+| Keystroke *delivery* to a focused control | `Category=InteractiveDesktop` test — needs a console/RDP/self-hosted session; hosted runners have no input desktop |
+| Real IBKR window titles, focus-on-open, tab order, Enter-to-submit | **spike below** |
+
 ## Spike tasks (do these on a real Windows install)
 
 1. **Locate**: after installing, run `IbkrDesktopManager.exe` and confirm the detected version and

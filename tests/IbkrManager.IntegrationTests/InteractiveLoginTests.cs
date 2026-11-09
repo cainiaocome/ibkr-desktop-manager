@@ -31,16 +31,19 @@ public sealed class InteractiveLoginTests(TestHostFixture fixture, ITestOutputHe
             return;
         }
 
+        // Start the stub with its output path, then let the manager attach to it.
+        var host = fixture.StartHost([]);
         var harness = fixture.CreateHarness("test-user", "test-password");
         try
         {
             await harness.Manager.InitializeAsync();
+            await harness.Manager.StartAsync();
             var state = await harness.Manager.AutoLoginAsync();
             output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
 
-            Assert.True(File.Exists(harness.OutputPath),
+            Assert.True(File.Exists(host.OutputPath),
                 "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
-            var payload = TestHostFixture.ReadPayload(harness.OutputPath);
+            var payload = TestHostFixture.ReadPayload(host.OutputPath);
             Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             Assert.Equal("test-user", payload.GetProperty("username").GetString());
             Assert.Equal("test-password", payload.GetProperty("password").GetString());

@@ -94,7 +94,7 @@ started (that is the kill-on-close job object doing its job).
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 95 tests: core, platform, view models, headless UI render
+dotnet test                        # 109 tests: core, platform, view models, headless UI render, Windows integration
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App
 ```
@@ -102,13 +102,35 @@ dotnet run --project src/IbkrManager.App
 - `src/IbkrManager.Core` — state machine, credential resolution, settings, logging. No P/Invoke.
 - `src/IbkrManager.Platform.Windows` — registry lookup, process/job control, SendInput, Credential Manager.
 - `src/IbkrManager.App` — Avalonia UI (MVVM), two dialogs.
+- `src/IbkrManager.TestHost` — a WinForms stand-in for IBKR Desktop (`ibkr-testhost.exe`) used by the
+  integration tests; only executed on Windows.
 - `tests/*` — xUnit; the UI render tests capture `docs/images/*.png` headlessly, so a XAML regression
   shows up as a diffable screenshot.
 
-Everything except the platform layer builds and tests on Linux/macOS; the Windows APIs themselves are
-exercised by the `windows-latest` CI job. See [docs/design.md](docs/design.md) for the architecture,
-[docs/usage.md](docs/usage.md) for the user guide, and [docs/ibkr-app-notes.md](docs/ibkr-app-notes.md)
-for what still needs to be verified against a real IBKR Desktop install.
+Everything except the platform layer builds and tests on Linux/macOS. The Windows APIs are exercised
+by the `windows-latest` CI job, which runs the manager against the stub app for real.
+
+### What is verified where
+
+| Area | Linux/macOS | `windows-latest` CI | Interactive Windows session |
+|---|---|---|---|
+| State machine, credential chain, redaction | unit tests | unit tests | — |
+| Credential Manager, HKCU\Environment | skip | real Win32 round-trip | — |
+| Registry discovery, launch/attach, window classification | skip | **real integration tests** | — |
+| Graceful `WM_CLOSE` quit, process-tree kill | skip | **real integration tests** | — |
+| `SendInput` keystrokes reaching a focused field | sequence unit tests (faked keyboard) | not delivered¹ | **integration test** |
+
+¹ Hosted Windows runners are service sessions: windows exist and can be focused, but there is no
+input desktop, so synthetic keystrokes are dropped. Run the typing check on a console/RDP session or
+a self-hosted interactive runner:
+
+```powershell
+dotnet test tests/IbkrManager.IntegrationTests -c Release --filter "Category=InteractiveDesktop"
+```
+
+See [docs/design.md](docs/design.md) for the architecture, [docs/usage.md](docs/usage.md) for the user
+guide, and [docs/ibkr-app-notes.md](docs/ibkr-app-notes.md) for what still needs a real IBKR Desktop
+install to confirm.
 
 ## Releasing
 

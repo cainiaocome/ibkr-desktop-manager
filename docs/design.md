@@ -320,9 +320,22 @@ What shipped, and where it lives:
 | Credential Manager + env export | `Platform.Windows/WindowsCredentialStore.cs`, `WindowsUserEnvironment.cs` |
 | Login driver | `Platform.Windows/SendInputLoginDriver.cs` (`sendinput`), `Core/ManualLoginDriver.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 95 xUnit tests, including headless Skia renders of all three windows |
+| Tests | 109 xUnit tests, including headless Skia renders of all three windows and a Windows integration suite that drives a stub app through the real platform layer |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate v0.1.0 gaps (also listed in `docs/ibkr-app-notes.md`): UIA and JVM-property login
 drivers, tray icon, start-with-Windows, auto-update, macOS. The `ILoginDriver`, `IAppLocator`,
 `IProcessController`, `ICredentialStore` and `IPlatformRuntime` seams are what those need.
+
+### What CI can and cannot prove
+
+`windows-latest` runs the integration suite against `src/IbkrManager.TestHost` — a WinForms stand-in
+named `ibkr-testhost.exe` registered in `HKCU\...\Uninstall` — so registry discovery, launch/attach,
+window-title classification, `WM_CLOSE`, job-object cleanup and process-tree kill are all exercised
+against real Win32, not fakes.
+
+Synthetic keyboard input is the exception: hosted Windows runners run jobs in a service session with
+no input desktop, so `SendInput` returns success but nothing is delivered. The keystroke sequence is
+unit-tested through the `IKeyboardInput` seam; the delivery test is tagged
+`Category=InteractiveDesktop`, detects the session (`OpenInputDesktop`) and skips with a logged
+reason elsewhere. CI prints a notice so the gap is visible instead of silently green.
