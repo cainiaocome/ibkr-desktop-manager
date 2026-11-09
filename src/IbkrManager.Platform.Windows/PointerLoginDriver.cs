@@ -148,6 +148,7 @@ public sealed class PointerLoginDriver(
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + profile.LoginResultTimeout;
+        var formGoneStreak = 0;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -173,8 +174,9 @@ public sealed class PointerLoginDriver(
                     "Check the credentials, or log in manually.");
             }
 
-            // While "Connecting to server…" is on screen the answer is still coming; once the form
-            // is gone and nothing is loading, the app has left the login screen for good.
+            // While "Connecting to server…" is on screen the answer is still coming. The form being
+            // gone is only trusted once the view has settled: IBKR swaps the form for a progress view,
+            // then either the app itself or a refusal dialog, and the intermediate state is transient.
             if (controls is null && !HasProgress(observation))
             {
                 if (observation is { } snapshot &&
@@ -184,7 +186,15 @@ public sealed class PointerLoginDriver(
                         "Credentials accepted — enter the 2FA code in the app to finish logging in");
                 }
 
-                return LoginResult.Submitted("IBKR accepted the credentials; the login screen is gone");
+                formGoneStreak++;
+                if (formGoneStreak >= 2)
+                {
+                    return LoginResult.Submitted("IBKR accepted the credentials; the login screen is gone");
+                }
+            }
+            else
+            {
+                formGoneStreak = 0;
             }
 
             try

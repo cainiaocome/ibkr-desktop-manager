@@ -141,6 +141,11 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
                 verdict is not null,
                 "the app did not report a login rejection. Observed text: " +
                 (observed.Count == 0 ? "(none)" : string.Join(" / ", observed)));
+
+            // The driver must not report success when the app answered with a refusal dialog.
+            Assert.False(
+                result.Success && verdict?.DialogButton is not null,
+                $"the driver reported '{result.Message}' although IBKR showed a refusal dialog");
         }
         finally
         {
