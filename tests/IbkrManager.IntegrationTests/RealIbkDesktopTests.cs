@@ -69,7 +69,11 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
             output.WriteLine($"title: '{state.WindowTitle}'  status: {state.Status}");
 
             Assert.False(string.IsNullOrWhiteSpace(state.WindowTitle), "the app should expose a main window title");
-            Assert.Equal(WindowKind.Login, Profile.Classify(state.WindowTitle));
+            var kind = Profile.Classify(state.WindowTitle);
+            Assert.True(
+                kind == WindowKind.Login,
+                $"the real window title '{state.WindowTitle}' must classify as Login, but was {kind}. " +
+                "Update app-profile.json loginWindowTitlePatterns (and keep the 2FA patterns ahead of them).");
         }
         finally
         {

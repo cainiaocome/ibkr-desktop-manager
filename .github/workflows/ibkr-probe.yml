@@ -65,7 +65,8 @@ jobs:
         env:
           IBKR_REAL_APP: '1'
         run: |
-          dotnet build tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj -c Release
+          dotnet restore IbkrDesktopManager.sln
+          dotnet build tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj -c Release --no-restore
           dotnet test tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj `
             -c Release --no-build --filter "Category=RealIbkDesktop" `
             --logger "trx" --results-directory TestResults/real-app

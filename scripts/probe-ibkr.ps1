@@ -58,7 +58,7 @@ function Get-InstallerPath {
 }
 
 function Invoke-Installer {
-    param([string]$Installer, [string]$Target, [string]$LogPath)
+    param([string]$Installer, [string]$Target, [string]$LogPath, [int]$TimeoutSeconds = 900)
 
     $attempts = @(
         @{ Name = 'install4j unattended'; Args = @('-q', '-dir', $Target, '-overwrite') },
@@ -70,13 +70,53 @@ function Invoke-Installer {
         Write-Host "Trying $($attempt.Name): $Installer $($attempt.Args -join ' ')"
         # Quote arguments that contain spaces (e.g. an install dir under Program Files).
         $quotedArgs = @($attempt.Args | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })
-        $proc = Start-Process -FilePath $Installer -ArgumentList $quotedArgs -PassThru -Wait -NoNewWindow `
+        $proc = Start-Process -FilePath $Installer -ArgumentList $quotedArgs -PassThru `
             -RedirectStandardOutput $LogPath -RedirectStandardError "$LogPath.err"
-        Write-Host "  exit code: $($proc.ExitCode)"
 
         $exe = Join-Path $Target 'ntws.exe'
-        if (Test-Path $exe) {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $installed = $false
+        $sawWindow = @{}
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 5
+            if (Test-Path $exe) {
+                $installed = $true
+                break
+            }
+
+            if ($proc.HasExited) {
+                Write-Host "  installer exited with code $($proc.ExitCode)"
+                break
+            }
+
+            # The installer may show a dialog (UAC, license, "launch app"); record it so the run
+            # artifacts explain a hang instead of just timing out.
+            try {
+                $installerWindows = @([ProbeNative]::Enumerate(@([int]$proc.Id)) | Where-Object { $_.Visible -and $_.Title })
+                foreach ($window in $installerWindows) {
+                    if (-not $sawWindow.ContainsKey($window.Title)) {
+                        $sawWindow[$window.Title] = $true
+                        Write-Host ("  installer window: '{0}' (class {1})" -f $window.Title, $window.ClassName)
+                    }
+                }
+            } catch { }
+        }
+
+        if ($installed) {
+            Write-Host "  ntws.exe appeared after $([int]((Get-Date) - $proc.StartTime).TotalSeconds)s"
+            Start-Sleep -Seconds 10
+            if (-not $proc.HasExited) {
+                # install4j may keep the wizard alive (e.g. after launching the app); the files are
+                # what matter.
+                Write-Host '  installer still running after the files appeared; terminating it'
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
             return $true
+        }
+
+        if (-not $proc.HasExited) {
+            Write-Host "  installer did not finish within $TimeoutSeconds s; terminating"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         }
 
         Start-Sleep -Seconds 3
@@ -353,6 +393,11 @@ if (-not $discovery.Executable) {
 }
 
 Write-Section 'Launch'
+# The installer can auto-launch the app; start from a clean slate so the probe owns the process.
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'ntws.exe' -or $_.Name -eq 'java.exe' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+
 $workDir = Split-Path -Parent $discovery.Executable
 $process = Start-Process -FilePath $discovery.Executable -WorkingDirectory $workDir -PassThru
 Write-Host "Started ntws.exe (pid $($process.Id)) from $workDir"

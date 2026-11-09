@@ -20,7 +20,7 @@
   <!-- End-to-end tests drive a real GUI process, so the stub host is built next to the tests. -->
   <Target Name="BuildAndCopyTestHost" AfterTargets="Build">
     <MSBuild Projects="..\..\src\IbkrManager.TestHost\IbkrManager.TestHost.csproj"
-             Targets="Build"
+             Targets="Restore;Build"
              Properties="Configuration=$(Configuration)" />
     <ItemGroup>
       <TestHostFiles Include="..\..\src\IbkrManager.TestHost\bin\$(Configuration)\net8.0-windows\**\*" />
