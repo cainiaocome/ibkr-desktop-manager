@@ -29,6 +29,8 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again|could\s+not",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    private static readonly string[] DialogButtons = ["ok", "okay", "close", "cancel", "retry", "dismiss"];
+
     private static readonly Regex EmptyFormPrompt = new(
         @"(please\s+)?(enter|provide|type)\s+(your\s+)?(username|user\s+name|login).{0,40}password",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -97,16 +99,16 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
 
             var observed = new List<string>();
             var snapshots = new List<string>();
-            var rejection = await WaitForRejectionAsync(manager, outputDirectory, observed, snapshots, report);
+            var verdict = await WaitForVerdictAsync(manager, outputDirectory, observed, snapshots, report);
 
             report["observedTexts"] = observed;
             report["snapshots"] = snapshots;
-            report["rejection"] = rejection;
+            report["verdict"] = verdict is null ? null : new { verdict.Value.Text, verdict.Value.DialogButton };
             WriteReport(outputDirectory, report);
 
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
             output.WriteLine("texts after submitting: " + (observed.Count == 0 ? "(none)" : string.Join(" / ", observed)));
-            output.WriteLine("rejection: " + (rejection ?? "(none found)"));
+            output.WriteLine("verdict: " + (verdict?.ToString() ?? "(none)"));
 
             // 1. The typing must have reached the app. The driver only submits after verifying that
             //    the username was typed and that the password field reports characters.
@@ -116,8 +118,10 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
                 string.Join(Environment.NewLine, log.Messages));
 
             // 2. With random credentials the app must reject the login, not complain about empty fields.
+            //    IBKR draws its refusal in a QML dialog whose text UI Automation does not expose, so a
+            //    dialog button (OK/Close/…) is accepted as the verdict too.
             Assert.True(
-                rejection is not null,
+                verdict is not null,
                 "the app did not report a login rejection. Observed text: " +
                 (observed.Count == 0 ? "(none)" : string.Join(" / ", observed)));
         }
@@ -128,11 +132,18 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>How the app answered the login attempt.</summary>
+    private readonly record struct Verdict(string? Text, string? DialogButton)
+    {
+        public override string ToString() =>
+            Text is not null ? $"text: \"{Text}\"" : $"dialog button: \"{DialogButton}\"";
+    }
+
     /// <summary>
-    /// Polls every window of the app until one of them reports a rejection, capturing screenshots
-    /// along the way so the sequence can be inspected after the run.
+    /// Polls every window of the app until it answers the login attempt, capturing screenshots along
+    /// the way so the sequence can be inspected after the run.
     /// </summary>
-    private async Task<string?> WaitForRejectionAsync(
+    private async Task<Verdict?> WaitForVerdictAsync(
         AppManager manager,
         string outputDirectory,
         List<string> observed,
@@ -163,8 +174,15 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             var rejection = texts.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
             if (rejection is not null)
             {
-                report["rejectionWindows"] = appWindows.Select(window => window.ToString()).ToList();
-                return rejection;
+                report["verdictWindows"] = appWindows.Select(window => window.ToString()).ToList();
+                return new Verdict(rejection, null);
+            }
+
+            var dialogButton = texts.FirstOrDefault(text => DialogButtons.Contains(text, StringComparer.OrdinalIgnoreCase));
+            if (dialogButton is not null)
+            {
+                report["verdictWindows"] = appWindows.Select(window => window.ToString()).ToList();
+                return new Verdict(null, dialogButton);
             }
 
             if (DateTimeOffset.UtcNow >= nextCapture)

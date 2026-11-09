@@ -151,6 +151,16 @@ public sealed class PointerLoginDriver(
                 return LoginResult.Failed($"IBKR reported: \"{message}\"");
             }
 
+            // IBKR shows the refusal in a QML dialog whose text is not exposed through UI Automation
+            // (only its buttons are), so the dialog itself is the signal: the login screen has no
+            // OK/Close/Cancel button.
+            if (FindDialogButton(username, password) is { } dialogButton)
+            {
+                return LoginResult.Failed(
+                    $"IBKR reported a login failure (a dialog with a \"{dialogButton}\" button is open). " +
+                    "Check the credentials, or log in manually.");
+            }
+
             if (ui.FindLoginControls() is null && inspector?.Observe() is { } observation)
             {
                 if (observation.Elements.Any(element => element.ControlType.Contains("Progress", StringComparison.OrdinalIgnoreCase)))
@@ -379,6 +389,18 @@ public sealed class PointerLoginDriver(
     private static readonly System.Text.RegularExpressions.Regex FailureText = new(
         @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again|could\s+not|unable\s+to|timed\s+out|error",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly string[] DialogButtons = ["ok", "okay", "close", "cancel", "retry", "dismiss"];
+
+    /// <summary>A dialog button that the login screen never has, i.e. evidence of a refusal dialog.</summary>
+    private string? FindDialogButton(string username, string password) =>
+        inspector?.Observe()?.Elements
+            .Where(element => element.ControlType.Contains("Button", StringComparison.OrdinalIgnoreCase))
+            .Select(element => element.Name?.Trim())
+            .FirstOrDefault(name => !string.IsNullOrEmpty(name) &&
+                                    DialogButtons.Contains(name, StringComparer.OrdinalIgnoreCase) &&
+                                    !name.Contains(username, StringComparison.OrdinalIgnoreCase) &&
+                                    !name.Contains(password, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The app's own answer to this login attempt, or null when it has not answered yet.</summary>
     private string? FindFailure(string username, string password, HashSet<string> preexistingTexts) =>

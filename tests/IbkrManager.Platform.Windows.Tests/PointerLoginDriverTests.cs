@@ -242,7 +242,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls());
         var calls = 0;
-        harness.Inspector.Provider = () => Interlocked.Increment(ref calls) <= 3
+        harness.Inspector.Provider = () => Interlocked.Increment(ref calls) <= 4
             ? new UiObservation("IBKR Desktop", [new UiElementInfo("ProgressBar", string.Empty, "connecting", false)])
             : new UiObservation(
                 "IBKR Desktop",
@@ -291,6 +291,22 @@ public sealed class PointerLoginDriverTests
         Assert.False(result.Success);
         Assert.False(result.ReachedTwoFactor);
         Assert.Contains("Invalid username or password", result.Message);
+    }
+
+    [Fact]
+    public async Task Reports_a_refusal_dialog_as_a_failed_login()
+    {
+        // The real app shows "Login failed" in a QML dialog whose text is not exposed; only the OK
+        // button is visible to UI Automation.
+        var harness = new Harness(LoginControls(), TimeSpan.FromMilliseconds(5));
+        harness.Ui.FormVisiblePollsAfterSubmit = int.MaxValue;
+        harness.Inspector.Elements = [new UiElementInfo("Button", "OK", "NgStyleButton", false)];
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.False(result.Success);
+        Assert.False(result.ReachedTwoFactor);
+        Assert.Contains("login failure", result.Message);
     }
 
     [Fact]
