@@ -126,11 +126,19 @@ internal sealed class FakeInspector : IWindowInspector
 {
     public UiObservation? Observation { get; set; }
 
+    /// <summary>Simulates an app that answers accessibility queries slowly.</summary>
+    public TimeSpan Delay { get; set; }
+
     public int Calls { get; private set; }
 
     public UiObservation? Observe()
     {
         Calls++;
+        if (Delay > TimeSpan.Zero)
+        {
+            Thread.Sleep(Delay);
+        }
+
         return Observation;
     }
 }
@@ -159,6 +167,8 @@ internal static class TestProfile
         LoginWindowTitlePatterns = ["Login"],
         TwoFactorWindowTitlePatterns = ["Security Code"],
         LoggedInWindowTitlePatterns = ["Portfolio"],
+        LoginAutomationIdPatterns = ["launcherLoginWindow"],
+        LoginButtonNames = ["Log In"],
     };
 
     public static AppInstallation Installation => new(@"C:\Program Files\IBKR Desktop\ntws.exe", @"C:\Program Files\IBKR Desktop", "0.12.0");

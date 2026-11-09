@@ -15,6 +15,19 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private readonly IClock _clock;
     private readonly IAppLog _log;
     private readonly IWindowInspector _inspector;
+    private WindowKind? _lastKind;
+    private DateTimeOffset _nextInspection = DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// Accessibility calls run inside the app's UI thread, so they are throttled exactly where they
+    /// stop being useful: once the user is logged in there is nothing to detect every two seconds.
+    /// </summary>
+    private static readonly TimeSpan LoggedInInspectionInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>Back-off applied when an inspection is slow, to keep the app responsive.</summary>
+    private static readonly TimeSpan SlowInspectionInterval = TimeSpan.FromSeconds(60);
+
+    private static readonly TimeSpan SlowInspectionThreshold = TimeSpan.FromMilliseconds(750);
     private readonly TimeSpan _pollInterval;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -102,6 +115,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     public Task<AppState> StartAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Start", cancellationToken, async ct =>
         {
+            ResetInspection();
             _failed = false;
             _lastError = null;
             _twoFactorSince = null;
@@ -120,6 +134,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     public Task<AppState> AutoLoginAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Auto login", cancellationToken, async ct =>
         {
+            ResetInspection();
             _failed = false;
             _lastError = null;
             _twoFactorSince = null;
@@ -367,6 +382,13 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     /// </summary>
     private WindowKind ClassifyWindow()
     {
+        var now = _clock.UtcNow;
+        if (_lastKind is { } cached && now < _nextInspection)
+        {
+            return cached;
+        }
+
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         UiObservation? observation = null;
         try
         {
@@ -377,7 +399,29 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             _log.Warn($"UI Automation inspection failed: {ex.Message}");
         }
 
-        return UiClassifier.Classify(Profile, _process.MainWindowTitle, observation);
+        var kind = UiClassifier.Classify(Profile, _process.MainWindowTitle, observation);
+
+        // Measured with a stopwatch: the injected clock may be frozen, but the cost is real.
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startedAt);
+        var interval = kind == WindowKind.LoggedIn ? LoggedInInspectionInterval : TimeSpan.Zero;
+        if (elapsed > SlowInspectionThreshold)
+        {
+            interval = SlowInspectionInterval;
+            _log.Warn(
+                $"UI Automation inspection took {elapsed.TotalMilliseconds:0} ms; pausing further inspections for " +
+                $"{interval.TotalSeconds:0} s so {Profile.DisplayName} stays responsive");
+        }
+
+        _lastKind = kind;
+        _nextInspection = _clock.UtcNow + interval;
+        return kind;
+    }
+
+    /// <summary>A new session must be inspected immediately, not served from the previous throttle window.</summary>
+    private void ResetInspection()
+    {
+        _lastKind = null;
+        _nextInspection = DateTimeOffset.MinValue;
     }
 
     private bool InLaunchGracePeriod() =>

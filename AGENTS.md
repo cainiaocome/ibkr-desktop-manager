@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 154 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 159 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -91,6 +91,11 @@ Facts learned the hard way (do not regress them):
   brings it back with a **QML dialog titled "Login failed"** whose text is *not* exposed through UI
   Automation — only its `OK` button is. Detecting the button is the reliable verdict; the wording is
   only visible in screenshots (`TestResults/e2e/e2e-verdict-screen.png`).
+- Accessibility calls run inside the app's UI thread: never use `FindAll(Descendants, TrueCondition)`
+  and never read four uncached properties per element. The inspector walks breadth-first with a
+  depth/node budget, uses a UIA cache request, inspects only login windows deeply, and the manager
+  throttles inspections once the app is logged in. Breaking this makes the real app appear frozen
+  after login (this already happened once).
 - Hosted Windows runners are a service session: `SendInput` is discarded, but posted window messages
   (`WM_LBUTTONDOWN`, `WM_CHAR`) reach the QML fields. Never "fix" a typing test by weakening it —
   check which strategy the driver log says was used.

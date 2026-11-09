@@ -119,6 +119,7 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | Auto Login reports "login window is still showing" | Wrong credentials, extra dialog on screen, or the app changed its login form → try `manual` |
 | "the app did not receive the typed username" | Another window took focus, a UAC prompt is in front, or the app is elevated while the manager is not. Click into the IBKR window and retry, or run both at the same privilege level |
 | Status stays "Starting…" | The app may be showing a splash window; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
+| IBKR Desktop becomes unresponsive after logging in | Fixed in 0.1.4: the manager no longer traverses the logged-in window's accessibility tree every couple of seconds. Update, or run the app without the manager to confirm the app itself is healthy |
 | App shows "Error: Hardware not supported" | IBKR Desktop needs a supported GPU; the manager still starts/quits it, and UIA may still work |
 | Auto Login types into the wrong field | Tab order changed; use `manual` and report it with the log |
 | SmartScreen warning | Expected for unsigned binaries; verify the SHA-256 from `SHA256SUMS` |

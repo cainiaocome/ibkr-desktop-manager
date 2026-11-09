@@ -148,11 +148,16 @@ public sealed class PointerLoginDriver(
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + profile.LoginResultTimeout;
-        var sawProgress = false;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var message = FindFailure(username, password, preexistingTexts);
+            // Exactly one accessibility snapshot per poll: these calls run inside the app's UI
+            // thread, and after a successful login that window is large enough for repeated
+            // traversals to make the app unresponsive.
+            var observation = inspector?.Observe();
+            var controls = ui.FindLoginControls();
+
+            var message = FindFailure(observation, username, password, preexistingTexts);
             if (message is not null)
             {
                 return LoginResult.Failed($"IBKR reported: \"{message}\"");
@@ -161,39 +166,30 @@ public sealed class PointerLoginDriver(
             // IBKR shows the refusal in a QML dialog whose text is not exposed through UI Automation
             // (only its buttons are), so the dialog itself is the signal: the login screen has no
             // OK/Close/Cancel button.
-            if (FindDialogButton(username, password) is { } dialogButton)
+            if (FindDialogButton(observation, username, password) is { } dialogButton)
             {
                 return LoginResult.Failed(
                     $"IBKR reported a login failure (a dialog with a \"{dialogButton}\" button is open). " +
                     "Check the credentials, or log in manually.");
             }
 
-            if (ui.FindLoginControls() is null && inspector?.Observe() is { } observation)
+            // While "Connecting to server…" is on screen the answer is still coming; once the form
+            // is gone and nothing is loading, the app has left the login screen for good.
+            if (controls is null && !HasProgress(observation))
             {
-                if (observation.Elements.Any(element => element.ControlType.Contains("Progress", StringComparison.OrdinalIgnoreCase)))
+                if (observation is { } snapshot &&
+                    UiClassifier.Classify(profile, snapshot.WindowTitle, snapshot) == WindowKind.TwoFactor)
                 {
-                    // "Connecting to server…" — keep polling for the real answer.
-                    sawProgress = true;
+                    return LoginResult.AwaitingTwoFactor(
+                        "Credentials accepted — enter the 2FA code in the app to finish logging in");
                 }
-                else
-                {
-                    var kind = UiClassifier.Classify(profile, observation.WindowTitle, observation);
-                    if (kind == WindowKind.TwoFactor)
-                    {
-                        return LoginResult.AwaitingTwoFactor(
-                            "Credentials accepted — enter the 2FA code in the app to finish logging in");
-                    }
 
-                    if (kind == WindowKind.LoggedIn && sawProgress)
-                    {
-                        return LoginResult.Submitted("IBKR accepted the credentials; the login screen is gone");
-                    }
-                }
+                return LoginResult.Submitted("IBKR accepted the credentials; the login screen is gone");
             }
 
             try
             {
-                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -400,8 +396,8 @@ public sealed class PointerLoginDriver(
     private static readonly string[] DialogButtons = ["ok", "okay", "close", "cancel", "retry", "dismiss"];
 
     /// <summary>A dialog button that the login screen never has, i.e. evidence of a refusal dialog.</summary>
-    private string? FindDialogButton(string username, string password) =>
-        inspector?.Observe()?.Elements
+    private static string? FindDialogButton(UiObservation? observation, string username, string password) =>
+        observation?.Elements
             .Where(element => element.ControlType.Contains("Button", StringComparison.OrdinalIgnoreCase))
             .Select(element => element.Name?.Trim())
             .FirstOrDefault(name => !string.IsNullOrEmpty(name) &&
@@ -409,9 +405,12 @@ public sealed class PointerLoginDriver(
                                     !name.Contains(username, StringComparison.OrdinalIgnoreCase) &&
                                     !name.Contains(password, StringComparison.OrdinalIgnoreCase));
 
+    private static bool HasProgress(UiObservation? observation) =>
+        observation?.Elements.Any(element => element.ControlType.Contains("Progress", StringComparison.OrdinalIgnoreCase)) == true;
+
     /// <summary>The app's own answer to this login attempt, or null when it has not answered yet.</summary>
-    private string? FindFailure(string username, string password, HashSet<string> preexistingTexts) =>
-        DescribeAppTexts(username, password)
+    private string? FindFailure(UiObservation? observation, string username, string password, HashSet<string> preexistingTexts) =>
+        Texts(observation, username, password)
             .FirstOrDefault(text => !preexistingTexts.Contains(text) && FailureText.IsMatch(text));
 
     /// <summary>
@@ -420,24 +419,20 @@ public sealed class PointerLoginDriver(
     /// </summary>
     private string DescribeApp(params string[] secrets)
     {
-        var texts = DescribeAppTexts(secrets).Take(6).ToList();
+        var texts = Texts(inspector?.Observe(), secrets).Take(6).ToList();
         return texts.Count == 0 ? string.Empty : " The app shows: " + string.Join(" / ", texts.Select(text => $"\"{text}\""));
     }
 
-    private List<string> DescribeAppTexts(params string[] secrets)
-    {
-        var observation = inspector?.Observe();
-        if (observation is null)
-        {
-            return [];
-        }
+    private List<string> DescribeAppTexts(params string[] secrets) => Texts(inspector?.Observe(), secrets);
 
-        return observation.Elements
-            .Select(element => element.Name?.Trim())
-            .Where(name => !string.IsNullOrWhiteSpace(name) && name!.Length is > 2 and < 200)
-            .Where(name => !secrets.Any(secret => !string.IsNullOrEmpty(secret) && name!.Contains(secret, StringComparison.OrdinalIgnoreCase)))
-            .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+    private static List<string> Texts(UiObservation? observation, params string[] secrets) =>
+        observation is null
+            ? []
+            : observation.Elements
+                .Select(element => element.Name?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && name!.Length is > 2 and < 200)
+                .Where(name => !secrets.Any(secret => !string.IsNullOrEmpty(secret) && name!.Contains(secret, StringComparison.OrdinalIgnoreCase)))
+                .Select(name => name!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 }

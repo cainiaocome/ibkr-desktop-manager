@@ -185,6 +185,55 @@ public sealed class AppManagerTests
     }
 
     [Fact]
+    public async Task Inspection_is_throttled_once_the_app_is_logged_in()
+    {
+        // Accessibility calls run inside the app's UI thread; a logged-in trading window is far too
+        // large to traverse on every GUI tick (this is what made the app unresponsive).
+        var harness = new Harness();
+        harness.Process.IsRunning = true;
+        harness.Process.HasVisibleWindow = true;
+        harness.Process.MainWindowTitle = "IBKR Desktop";
+        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Window", "IBKR Desktop", "QApplication.mainWindow", false),
+            new UiElementInfo("Pane", "", "positions", false),
+            new UiElementInfo("Pane", "", "orders", false),
+        ]);
+
+        var first = await harness.Manager.TickAsync();
+        var second = await harness.Manager.TickAsync();
+        var third = await harness.Manager.TickAsync();
+
+        Assert.Equal(AppStatus.LoggedIn, first.Status);
+        Assert.Equal(AppStatus.LoggedIn, second.Status);
+        Assert.Equal(AppStatus.LoggedIn, third.Status);
+        Assert.Equal(1, harness.Inspector.Calls);
+    }
+
+    [Fact]
+    public async Task Slow_inspection_backs_off_instead_of_hammering_the_app()
+    {
+        var harness = new Harness();
+        harness.Process.IsRunning = true;
+        harness.Process.HasVisibleWindow = true;
+        harness.Process.MainWindowTitle = "IBKR Desktop";
+        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
+            new UiElementInfo("Button", "Log In", "login", false),
+        ]);
+        harness.Inspector.Delay = TimeSpan.FromMilliseconds(800);
+
+        var first = await harness.Manager.TickAsync();
+        var second = await harness.Manager.TickAsync();
+
+        Assert.Equal(AppStatus.AwaitingLogin, first.Status);
+        Assert.Equal(AppStatus.AwaitingLogin, second.Status);
+        Assert.Equal(1, harness.Inspector.Calls);
+        Assert.Contains(harness.Log.Warnings, message => message.Contains("pausing further inspections"));
+    }
+
+    [Fact]
     public async Task Tick_detects_a_logged_in_window()
     {
         var harness = new Harness();

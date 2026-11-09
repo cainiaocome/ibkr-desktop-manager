@@ -40,6 +40,34 @@ public sealed class UiAutomationTests
     }
 
     [Fact]
+    public void A_login_root_without_a_form_is_not_the_login_screen()
+    {
+        // The QML root keeps its automation id while it hosts the connecting/logged-in screens, so a
+        // bare root id must not keep reporting "login" after the form is gone.
+        var observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
+            new UiElementInfo("Pane", "", "mainView", false),
+            new UiElementInfo("Pane", "", "positions", false),
+        ]);
+
+        Assert.Equal(WindowKind.LoggedIn, UiClassifier.Classify(Profile, "IBKR Desktop", observation));
+    }
+
+    [Fact]
+    public void A_login_root_with_both_fields_is_the_login_screen()
+    {
+        var observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
+            new UiElementInfo("Edit", "", "username", false),
+            new UiElementInfo("Edit", "", "password", true),
+        ]);
+
+        Assert.Equal(WindowKind.Login, UiClassifier.Classify(Profile, "IBKR Desktop", observation));
+    }
+
+    [Fact]
     public void Two_factor_markers_win_over_login_markers()
     {
         var profile = Profile with { TwoFactorAutomationIdPatterns = ["SecurityCode"] };

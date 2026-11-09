@@ -72,6 +72,28 @@ The two screenshots committed next to the login window show exactly what the man
 | `docs/images/e2e-login-filled.png` | the random username `e2e_…` and 15 password characters are in the form at the moment of submission |
 | `docs/images/e2e-login-failed.png` | IBKR attempted the login and answered with the "Login failed" dialog, while the username field still holds the typed value |
 
+## Why the app froze after a successful login
+
+Accessibility calls are executed **inside the app's UI thread**. The original inspector did
+`FindAll(Descendants, TrueCondition)` on the main window and then read four properties per element,
+uncached, so every snapshot cost the app one full tree traversal plus up to 512 cross-process calls.
+That is fine for the 7-element login form and ruinous for the logged-in trading window (Qt/QML plus
+CEF content). It was made worse by the post-submit wait loop, which took three snapshots every
+500 ms for up to a minute.
+
+Three changes removed the cause:
+
+1. the tree is walked breadth-first with a depth (3) and node (150) budget, expanding only containers;
+   anything that is not a login window is inspected two levels deep at most;
+2. properties come from a UIA cache request, so an element costs one round trip instead of four;
+3. inspections are throttled: once the app is classified as logged in the manager re-checks every
+   30 s instead of every GUI tick, and a snapshot that takes longer than 750 ms pauses inspections for
+   60 s. The login wait reads one snapshot per second and stops as soon as the form is gone.
+
+The classifier also stopped treating the bare `launcherLoginWindow` root id as "login screen" (the
+root keeps that id while it hosts the connecting and logged-in views), which was what kept the old
+wait loop polling after a successful login.
+
 ## Why UI Automation is the primary login driver
 
 The window title never changes, and the app is a QML/CEF shell, so there is no reliable title to

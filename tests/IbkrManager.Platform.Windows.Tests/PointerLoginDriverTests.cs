@@ -281,16 +281,37 @@ public sealed class PointerLoginDriverTests
     {
         // A wrong password also removes the login form: the app's message must be reported.
         var harness = new Harness(LoginControls());
-        harness.Inspector.Elements =
-        [
-            new UiElementInfo("Text", "Invalid username or password", string.Empty, false),
-        ];
+        var calls = 0;
+        harness.Inspector.Provider = () => Interlocked.Increment(ref calls) == 1
+            // before submitting, the login screen shows no message
+            ? new UiObservation("IBKR Desktop", [new UiElementInfo("Button", "Log In", "login", false)])
+            : new UiObservation("IBKR Desktop", [new UiElementInfo("Text", "Invalid username or password", string.Empty, false)]);
 
         var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.False(result.ReachedTwoFactor);
         Assert.Contains("Invalid username or password", result.Message);
+    }
+
+    [Fact]
+    public async Task Stops_inspecting_as_soon_as_the_app_leaves_the_login_screen()
+    {
+        // Inspections run inside the app's UI thread, so the wait must end at the first snapshot that
+        // shows the form gone instead of polling the whole timeout.
+        var harness = new Harness(LoginControls(), TimeSpan.FromSeconds(30));
+        harness.Inspector.Provider = () => new UiObservation(
+            "IBKR Desktop",
+            [
+                new UiElementInfo("Window", "IBKR Desktop", "main", false),
+                new UiElementInfo("Pane", "", "positions", false),
+                new UiElementInfo("Pane", "", "orders", false),
+            ]);
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.True(result.Success, result.Message);
+        Assert.InRange(harness.Inspector.Calls, 1, 4);
     }
 
     [Fact]
@@ -385,10 +406,16 @@ public sealed class PointerLoginDriverTests
     {
         public IReadOnlyList<UiElementInfo> Elements { get; set; } = [];
 
+        public int Calls { get; private set; }
+
         /// <summary>Optional scripted snapshots, for tests that need a sequence (progress → result).</summary>
         public Func<UiObservation?>? Provider { get; set; }
 
-        public UiObservation? Observe() => Provider?.Invoke() ?? new UiObservation("IBKR Desktop", Elements);
+        public UiObservation? Observe()
+        {
+            Calls++;
+            return Provider?.Invoke() ?? new UiObservation("IBKR Desktop", Elements);
+        }
     }
 
     /// <summary>Models the QML form: what has focus, and what each field currently contains.</summary>

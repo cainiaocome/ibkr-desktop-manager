@@ -125,6 +125,30 @@ internal static class Capture
         return windows.OrderBy(window => window.ProcessId).ToList();
     }
 
+    /// <summary>
+    /// Whether the window answers <c>WM_NULL</c> within the timeout. A UI thread busy servicing
+    /// accessibility requests (or otherwise wedged) fails this, which is how "the app froze" shows up
+    /// from the outside.
+    /// </summary>
+    public static bool IsResponsive(IntPtr window, int timeoutMilliseconds = 1000)
+    {
+        const uint SmtoAbortIfHung = 0x0002;
+        if (window == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var answered = SendMessageTimeout(
+            window,
+            0, // WM_NULL
+            IntPtr.Zero,
+            IntPtr.Zero,
+            SmtoAbortIfHung,
+            (uint)timeoutMilliseconds,
+            out _);
+        return answered != IntPtr.Zero;
+    }
+
     public static string Title(IntPtr window)
     {
         var length = GetWindowTextLength(window);
@@ -151,6 +175,16 @@ internal static class Capture
 
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr window,
+        uint message,
+        IntPtr wParam,
+        IntPtr lParam,
+        uint flags,
+        uint timeout,
+        out IntPtr result);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

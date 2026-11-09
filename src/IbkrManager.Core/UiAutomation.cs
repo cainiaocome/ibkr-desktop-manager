@@ -77,8 +77,11 @@ public static class UiClassifier
                 return WindowKind.TwoFactor;
             }
 
-            if (observation.HasAutomationId(profile.LoginAutomationIdPatterns) ||
-                observation.HasButtonNamed(profile.LoginButtonNames))
+            // Requiring a real affordance (the button, or a login root with both fields) matters: the
+            // QML root keeps its automation id while it hosts the "connecting" and logged-in screens,
+            // and a bare root id would then report "login screen" forever.
+            if (observation.HasButtonNamed(profile.LoginButtonNames) ||
+                (observation.HasAutomationId(profile.LoginAutomationIdPatterns) && observation.CountOf("Edit") >= 2))
             {
                 return WindowKind.Login;
             }

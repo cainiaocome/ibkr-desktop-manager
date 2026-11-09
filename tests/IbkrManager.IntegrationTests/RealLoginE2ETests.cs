@@ -101,6 +101,11 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
                 controls is not null,
                 "the real login form never appeared; log:\n" + string.Join(Environment.NewLine, log.Messages));
 
+            var appWindow = process.MainWindowHandle ?? IntPtr.Zero;
+            Assert.True(
+                Capture.IsResponsive(appWindow),
+                "the app stopped answering window messages as soon as the manager started inspecting it");
+
             var before = uia.Observe();
             CaptureState(outputDirectory, "before", process, before, report);
 
