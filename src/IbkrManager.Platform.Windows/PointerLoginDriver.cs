@@ -121,6 +121,14 @@ public sealed class PointerLoginDriver(
 
         if (ui.WaitUntilLoginControlsGone(request.Profile.LoginResultTimeout, cancellationToken))
         {
+            // A rejected login also makes the form disappear (error page or dialog), so report the
+            // app's answer instead of claiming it is waiting for a 2FA code.
+            var rejection = FindRejection(username, password);
+            if (rejection is not null)
+            {
+                return LoginResult.Failed($"IBKR rejected the credentials: \"{rejection}\"");
+            }
+
             return LoginResult.AwaitingTwoFactor(
                 "Credentials submitted — enter the 2FA code in the app to finish logging in");
         }
@@ -313,26 +321,38 @@ public sealed class PointerLoginDriver(
 
     private static string Delivery(bool usePosted) => usePosted ? "posted messages" : "SendInput";
 
+    private static readonly System.Text.RegularExpressions.Regex RejectionText = new(
+        @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>The app's message when it rejected the credentials, or null.</summary>
+    private string? FindRejection(params string[] secrets) =>
+        DescribeAppTexts(secrets).FirstOrDefault(text => RejectionText.IsMatch(text));
+
     /// <summary>
     /// The app's own visible text, so a failure explains itself ("Please enter your username and
     /// password" vs "Invalid username or password"). Credentials are filtered out.
     /// </summary>
     private string DescribeApp(params string[] secrets)
     {
+        var texts = DescribeAppTexts(secrets).Take(6).ToList();
+        return texts.Count == 0 ? string.Empty : " The app shows: " + string.Join(" / ", texts.Select(text => $"\"{text}\""));
+    }
+
+    private List<string> DescribeAppTexts(params string[] secrets)
+    {
         var observation = inspector?.Observe();
         if (observation is null)
         {
-            return string.Empty;
+            return [];
         }
 
-        var texts = observation.Elements
+        return observation.Elements
             .Select(element => element.Name?.Trim())
             .Where(name => !string.IsNullOrWhiteSpace(name) && name!.Length is > 2 and < 200)
             .Where(name => !secrets.Any(secret => !string.IsNullOrEmpty(secret) && name!.Contains(secret, StringComparison.OrdinalIgnoreCase)))
+            .Select(name => name!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6)
             .ToList();
-
-        return texts.Count == 0 ? string.Empty : " The app shows: " + string.Join(" / ", texts.Select(text => $"\"{text}\""));
     }
 }

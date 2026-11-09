@@ -243,6 +243,23 @@ public sealed class PointerLoginDriverTests
     }
 
     [Fact]
+    public async Task Reports_a_rejection_instead_of_waiting_for_two_factor_when_the_form_disappears()
+    {
+        // A wrong password also removes the login form: the app's message must be reported.
+        var harness = new Harness(LoginControls());
+        harness.Inspector.Elements =
+        [
+            new UiElementInfo("Text", "Invalid username or password", string.Empty, false),
+        ];
+
+        var result = await harness.Driver.LoginAsync(Request());
+
+        Assert.False(result.Success);
+        Assert.False(result.ReachedTwoFactor);
+        Assert.Contains("Invalid username or password", result.Message);
+    }
+
+    [Fact]
     public async Task Does_not_click_fields_without_a_screen_rectangle()
     {
         var harness = new Harness(LoginControls(username: new UiBounds(0, 0, 0, 0)));

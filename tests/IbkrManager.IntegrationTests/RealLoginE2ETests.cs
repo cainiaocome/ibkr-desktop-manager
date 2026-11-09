@@ -45,6 +45,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         var username = "e2e_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
         var password = "Pw!" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6));
         var outputDirectory = OutputDirectory();
+        KillStaleApp();
         var log = new RecordingLog();
         var process = new Win32ProcessController(Profile, log);
         var uia = new UiaSession(process, Profile, log);
@@ -77,7 +78,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             await manager.StartAsync();
             report["installation"] = manager.State.Installation?.ExecutablePath;
 
-            var controls = await WaitForLoginControlsAsync(uia, TimeSpan.FromMinutes(3));
+            var controls = await WaitForLoginControlsAsync(manager, uia, TimeSpan.FromMinutes(3));
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
             Assert.True(controls is not null, "the real login form never appeared; log:\n" + string.Join(Environment.NewLine, log.Messages));
 
@@ -97,12 +98,23 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             CaptureState(outputDirectory, "after", process, after, report);
 
             var beforeTexts = TextSet(before);
-            var newTexts = TextSet(after).Where(text => !beforeTexts.Contains(text)).ToList();
+            var afterTexts = TextSet(after);
+            var newTexts = afterTexts.Where(text => !beforeTexts.Contains(text)).ToList();
+            var appTitles = Capture.VisibleWindows()
+                .Where(window => window.ProcessId == manager.State.ProcessId)
+                .Select(window => window.Title)
+                .Where(title => !string.IsNullOrWhiteSpace(title))
+                .Distinct()
+                .ToList();
+            var candidates = newTexts.Concat(appTitles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             report["newTexts"] = newTexts;
+            report["appWindowTitles"] = appTitles;
+            report["allTexts"] = afterTexts.ToList();
 
             WriteReport(outputDirectory, report);
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
             output.WriteLine("new text after submitting: " + (newTexts.Count == 0 ? "(none)" : string.Join(" / ", newTexts)));
+            output.WriteLine("app window titles after submitting: " + string.Join(" / ", appTitles));
             output.WriteLine($"username field after submit: '{usernameAfter}' ({passwordLengthAfter?.ToString() ?? "-"} password chars)");
 
             // 1. The typing must have reached the app.
@@ -112,11 +124,11 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
 
             // 2. The app must have answered. With random credentials that answer is a rejection, and
             //    it must not be the "please enter your username and password" validation message.
-            var rejection = newTexts.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
+            var rejection = candidates.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
             Assert.True(
                 rejection is not null,
-                "the app did not report a login rejection. Observed new text: " +
-                (newTexts.Count == 0 ? "(none)" : string.Join(" / ", newTexts)));
+                "the app did not report a login rejection. Observed text: " +
+                (candidates.Count == 0 ? "(none)" : string.Join(" / ", candidates)));
 
             report["rejection"] = rejection;
             WriteReport(outputDirectory, report);
@@ -128,11 +140,13 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         }
     }
 
-    private static async Task<UiLoginControls?> WaitForLoginControlsAsync(UiaSession uia, TimeSpan timeout)
+    /// <summary>Advances the state machine and waits for the QML tree to expose the login form.</summary>
+    private static async Task<UiLoginControls?> WaitForLoginControlsAsync(AppManager manager, UiaSession uia, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
+            await manager.TickAsync();
             var controls = uia.FindLoginControls();
             if (controls is not null)
             {
@@ -143,6 +157,27 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         }
 
         return null;
+    }
+
+    /// <summary>A leftover IBKR Desktop from an earlier test would make this test attach to it.</summary>
+    private static void KillStaleApp()
+    {
+        foreach (var process in System.Diagnostics.Process.GetProcessesByName("ntws"))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(5000);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Already gone, or not ours to kill.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
     }
 
     private void CaptureState(
@@ -189,6 +224,12 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         if (string.IsNullOrWhiteSpace(directory))
         {
             directory = Path.Combine(AppContext.BaseDirectory, "e2e");
+        }
+        else if (!Path.IsPathRooted(directory))
+        {
+            // The workflow passes a workspace-relative path, but tests run from the build output.
+            var root = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE");
+            directory = string.IsNullOrWhiteSpace(root) ? Path.GetFullPath(directory) : Path.GetFullPath(Path.Combine(root, directory));
         }
 
         Directory.CreateDirectory(directory);

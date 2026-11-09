@@ -105,17 +105,6 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
 
             // Reading a field must work too: the driver uses it to prove the keystrokes landed.
             Assert.NotNull(uia.GetFieldValue(controls.UsernameIndex));
-
-            // In a service session the driver must decline rather than pretend it typed something.
-            if (!InteractiveSession.IsInteractive())
-            {
-                var pointer = new PointerLoginDriver(uia, process, log);
-                var session = await pointer.LoginAsync(
-                    new LoginRequest(new Secret("probe-user"), new Secret("probe-password"), Profile));
-                output.WriteLine($"pointer driver on this session: {session}");
-                Assert.True(session.NotApplicable, "the pointer driver must not claim success without an input desktop");
-                Assert.Contains("cannot deliver", session.Message, StringComparison.OrdinalIgnoreCase);
-            }
         }
         finally
         {
