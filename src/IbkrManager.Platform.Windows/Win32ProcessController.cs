@@ -43,13 +43,20 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         _startedAt);
 
     public string? MainWindowTitle => Read(
-        static process => string.IsNullOrWhiteSpace(process.MainWindowTitle) ? null : process.MainWindowTitle,
+        static process => WindowLocator.Title(WindowLocator.FindMainWindow(process.Id)),
         null);
 
-    public bool HasVisibleWindow => Read(static process => process.MainWindowHandle != IntPtr.Zero, false);
+    public bool HasVisibleWindow => Read(static process => WindowLocator.FindMainWindow(process.Id) != IntPtr.Zero, false);
 
+    /// <summary>
+    /// Live lookup instead of <see cref="Process.MainWindowHandle"/>: that property is cached by
+    /// .NET and goes stale as soon as the app swaps its splash window for the real one, which
+    /// then makes UI Automation fail with UIA_E_ELEMENTNOTAVAILABLE.
+    /// </summary>
     public IntPtr? MainWindowHandle => Read(
-        static process => process.MainWindowHandle is { } handle && handle != IntPtr.Zero ? (IntPtr?)handle : null,
+        static process => WindowLocator.FindMainWindow(process.Id) is var handle && handle != IntPtr.Zero
+            ? (IntPtr?)handle
+            : null,
         null);
 
     public Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default)
@@ -101,11 +108,7 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         IntPtr handle;
         try
         {
-            handle = process.MainWindowHandle;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
+            handle = WindowLocator.FindMainWindow(process.Id);
         }
         finally
         {
@@ -165,19 +168,21 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
 
         try
         {
-            var requested = process.CloseMainWindow();
-            if (!requested && process.MainWindowHandle == IntPtr.Zero)
+            var handle = WindowLocator.FindMainWindow(process.Id);
+            if (handle == IntPtr.Zero)
             {
                 // No window to close (e.g. still starting up) but the process exists.
                 _log.Warn("No main window to close; will wait for exit or terminate");
                 return Task.FromResult(true);
             }
 
+            var requested = NativeMethods.PostMessage(handle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            if (!requested)
+            {
+                _log.Warn($"PostMessage(WM_CLOSE) failed ({System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+            }
+
             return Task.FromResult(requested);
-        }
-        catch (InvalidOperationException)
-        {
-            return Task.FromResult(true);
         }
         finally
         {
