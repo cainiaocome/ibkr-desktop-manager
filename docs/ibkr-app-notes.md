@@ -65,6 +65,13 @@ Important for automation: the dialog's **text is not exposed through UI Automati
 buttons (`OK`) are. So the failure verdict is detected by the dialog's button, and the message itself
 is verified by looking at the screenshot artifact (`e2e-verdict-screen.png`).
 
+The two screenshots committed next to the login window show exactly what the manager did in CI:
+
+| Image | What it proves |
+|---|---|
+| `docs/images/e2e-login-filled.png` | the random username `e2e_…` and 15 password characters are in the form at the moment of submission |
+| `docs/images/e2e-login-failed.png` | IBKR attempted the login and answered with the "Login failed" dialog, while the username field still holds the typed value |
+
 ## Why UI Automation is the primary login driver
 
 The window title never changes, and the app is a QML/CEF shell, so there is no reliable title to

@@ -12,6 +12,13 @@ explicitly ask it to.
 
 <sub>The app it manages — the real IBKR Desktop login window: `docs/images/ibkr-desktop-login.png`.</sub>
 
+What CI verifies against the real app, every run — the manager typing random credentials and IBKR
+refusing them:
+
+| Filled by the manager | IBKR's answer |
+|---|---|
+| ![Filled login form](docs/images/e2e-login-filled.png) | ![Login failed dialog](docs/images/e2e-login-failed.png) |
+
 ## Why
 
 IBKR Desktop has no supported way to launch and sign in from a script, and no way to see whether
