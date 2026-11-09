@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the artifacts without creating a GitHub release
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: build, package, publish
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $version = '${{ github.ref_name }}'.TrimStart('v')
+          } else {
+            $version = '0.0.0-dev.' + ${{ github.run_number }}
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      - name: Restore
+        run: dotnet restore IbkrDesktopManager.sln
+
+      - name: Build
+        run: dotnet build IbkrDesktopManager.sln -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        run: >
+          dotnet test IbkrDesktopManager.sln -c Release --no-build
+          -p:Version=${{ steps.version.outputs.version }}
+          --logger "trx;LogFileName=results.trx"
+          --results-directory TestResults
+
+      - name: Publish
+        run: >
+          dotnet publish src/IbkrManager.App/IbkrManager.App.csproj
+          -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=embedded
+          -p:Version=${{ steps.version.outputs.version }}
+          -o artifacts/publish
+
+      - name: Sign the executable (skipped without a certificate)
+        if: ${{ vars.SIGNING_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CERT_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:CERT_PASSWORD artifacts/publish/IbkrDesktopManager.exe
+          Remove-Item $certPath -Force
+
+      - name: Package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $stage = 'artifacts/stage'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item artifacts/publish/* $stage -Recurse
+          Copy-Item README.md, LICENSE -Destination $stage
+          $zip = "IbkrDesktopManager-$env:VERSION-win-x64.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath "artifacts/$zip" -CompressionLevel Optimal
+
+          $hash = (Get-FileHash "artifacts/$zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Set-Content artifacts/SHA256SUMS -Encoding ascii
+          Write-Host "Packaged artifacts/$zip ($hash)"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS
+          retention-days: 14
+
+      - name: Create GitHub release
+        if: ${{ github.ref_type == 'tag' && inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create $env:TAG `
+            "artifacts/IbkrDesktopManager-$env:VERSION-win-x64.zip" `
+            artifacts/SHA256SUMS `
+            --title "IBKR Desktop Manager $env:VERSION" `
+            --generate-notes `
+            --verify-tag
+
+      - name: Attest build provenance
+        if: ${{ github.ref_type == 'tag' && inputs.dry_run != true }}
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: artifacts/IbkrDesktopManager-${{ steps.version.outputs.version }}-win-x64.zip

@@ -1,0 +1,21 @@
+{
+  "displayName": "IBKR Desktop",
+  "executableName": "ntws.exe",
+  "registryDisplayNamePatterns": ["IBKR Desktop", "IBKR-D"],
+  "fallbackInstallPaths": [
+    "C:\\Program Files\\IBKR Desktop",
+    "C:\\Program Files (x86)\\IBKR Desktop",
+    "C:\\ntws",
+    "C:\\Program Files\\ntws"
+  ],
+  "loginWindowTitlePatterns": ["Login", "Log In", "Sign In", "Logon"],
+  "twoFactorWindowTitlePatterns": ["Security Code", "Two-Factor", "Two Factor", "Authentication Code"],
+  "loggedInWindowTitlePatterns": ["IBKR Desktop", "Trader Workstation", "Portfolio"],
+  "launchTimeoutSeconds": 120,
+  "loginWindowTimeoutSeconds": 120,
+  "gracefulShutdownTimeoutSeconds": 15,
+  "loginResultTimeoutSeconds": 60,
+  "typingDelayMilliseconds": 30,
+  "submitAfterPassword": true,
+  "downloadUrl": "https://www.interactivebrokers.com/en/trading/ibkr-desktop-download.php"
+}

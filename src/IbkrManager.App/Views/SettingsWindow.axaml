@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:IbkrManager.App.ViewModels"
+        x:Class="IbkrManager.App.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="Settings"
+        Width="520"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="20" Spacing="12">
+    <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="IBKR Desktop executable (optional override)" FontSize="12" Foreground="#888888" />
+      <TextBox Text="{Binding ExecutablePath}" Watermark="C:\Program Files\IBKR Desktop\ntws.exe" />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="*,12,*">
+      <StackPanel Spacing="4">
+        <TextBlock Text="Username variable" FontSize="12" Foreground="#888888" />
+        <TextBox Text="{Binding UsernameVariable}" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" Spacing="4">
+        <TextBlock Text="Password variable" FontSize="12" Foreground="#888888" />
+        <TextBox Text="{Binding PasswordVariable}" />
+      </StackPanel>
+    </Grid>
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="Login driver" FontSize="12" Foreground="#888888" />
+      <ComboBox ItemsSource="{Binding LoginDrivers}" SelectedItem="{Binding LoginDriver}" HorizontalAlignment="Stretch" />
+    </StackPanel>
+
+    <TextBlock Text="{Binding SettingsPath}" FontSize="11" Foreground="#888888" TextWrapping="Wrap" />
+
+    <Border IsVisible="{Binding HasError}" Background="#33E5534B" CornerRadius="6" Padding="8">
+      <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+    </Border>
+
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Content="Save" Command="{Binding SaveCommand}" Classes="accent" IsDefault="True" />
+    </StackPanel>
+  </StackPanel>
+</Window>

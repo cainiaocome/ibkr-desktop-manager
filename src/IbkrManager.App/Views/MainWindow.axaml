@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:IbkrManager.App.ViewModels"
+        x:Class="IbkrManager.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Width="780" Height="420"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12">
+    <StackPanel Grid.Row="0" Spacing="2">
+      <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="SemiBold" />
+      <TextBlock Text="Starts, monitors and stops IBKR Desktop."
+                 FontSize="12" Foreground="#888888" />
+    </StackPanel>
+
+    <Border Grid.Row="1" BorderBrush="#33808080" BorderThickness="1" CornerRadius="8" Padding="14">
+      <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Application" Foreground="#888888" />
+        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+          <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding StatusDetail}" FontSize="12" Foreground="#888888" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Foreground="#888888" />
+        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding VersionText}" />
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Credentials" Foreground="#888888" />
+        <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
+          <TextBlock Text="{Binding CredentialsText}" />
+          <TextBlock Text="{Binding CredentialsDetail}" FontSize="12" Foreground="#888888" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Login" Foreground="#888888" />
+        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding LoginStateText}" TextWrapping="Wrap" />
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="2" IsVisible="{Binding HasError}" Background="#33E5534B"
+            BorderBrush="#66E5534B" BorderThickness="1" CornerRadius="6" Padding="10">
+      <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" />
+    </Border>
+
+    <TextBlock Grid.Row="3" Text="{Binding LastActionText}" FontSize="12" Foreground="#888888"
+               VerticalAlignment="Bottom" TextWrapping="Wrap" />
+
+    <StackPanel Grid.Row="4" Spacing="10">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="Start" Command="{Binding StartCommand}" Width="90" Classes="accent" />
+          <Button Content="Auto Login" Command="{Binding AutoLoginCommand}" Width="110" />
+          <Button Content="Quit" Command="{Binding QuitCommand}" Width="80" />
+          <Button Content="Restart" Command="{Binding RestartCommand}" Width="90" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <Button Content="Credentials" Command="{Binding OpenCredentialsCommand}" />
+          <Button Content="Settings" Command="{Binding OpenSettingsCommand}" />
+          <Button Content="Logs" Command="{Binding OpenLogsCommand}" />
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+  </Grid>
+</Window>

@@ -1,0 +1,16 @@
+# build output
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+TestResults/
+coverage*.xml
+coverage*.json
+
+# local scratch
+tmp/
+markdown-for-ai/
+claude-code-review-result/
+reference-repos/

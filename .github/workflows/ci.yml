@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore IbkrDesktopManager.sln
+
+      - name: Format check
+        run: dotnet format IbkrDesktopManager.sln --verify-no-changes --verbosity minimal
+
+      - name: Build (warnings are errors)
+        run: dotnet build IbkrDesktopManager.sln -c Release --no-restore -warnaserror
+
+      - name: Test
+        run: >
+          dotnet test IbkrDesktopManager.sln -c Release --no-build
+          --logger "trx;LogFileName=results.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            TestResults/**/*.trx
+            TestResults/**/coverage.cobertura.xml
+          retention-days: 7
+
+      - name: Upload headless UI screenshots
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: '**/screenshots/*.png'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish-check:
+    name: publish win-x64 (smoke)
+    runs-on: windows-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish single-file executable
+        run: >
+          dotnet publish src/IbkrManager.App/IbkrManager.App.csproj
+          -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=embedded
+          -o artifacts/publish
+
+      - name: Verify the executable exists
+        shell: pwsh
+        run: |
+          $exe = Get-Item artifacts/publish/IbkrDesktopManager.exe
+          if ($exe.Length -lt 10MB) { throw "Executable looks too small: $($exe.Length) bytes" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64-smoke
+          path: artifacts/publish
+          retention-days: 3

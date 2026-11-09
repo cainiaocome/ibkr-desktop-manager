@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>IbkrManager.Core</RootNamespace>
+    <AssemblyName>IbkrManager.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="app-profile.json" LogicalName="IbkrManager.Core.app-profile.json" />
+  </ItemGroup>
+</Project>

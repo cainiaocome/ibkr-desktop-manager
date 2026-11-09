@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{22CE072B-F3F3-47BA-BFD8-EF7E06A97C82}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.Core", "src\IbkrManager.Core\IbkrManager.Core.csproj", "{65197408-A22B-46B0-B79E-6671DB9F2A31}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.Platform.Windows", "src\IbkrManager.Platform.Windows\IbkrManager.Platform.Windows.csproj", "{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.App", "src\IbkrManager.App\IbkrManager.App.csproj", "{B11C4477-E1C8-4411-8114-0AEAA12DE6EC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{EF5A0733-D8EE-484C-8727-570B9730157E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.Core.Tests", "tests\IbkrManager.Core.Tests\IbkrManager.Core.Tests.csproj", "{F13E85FC-CCA9-43A0-B0D0-0157F235468B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.Platform.Windows.Tests", "tests\IbkrManager.Platform.Windows.Tests\IbkrManager.Platform.Windows.Tests.csproj", "{776D544D-492C-40C1-A217-C2CA3F25C6F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IbkrManager.App.Tests", "tests\IbkrManager.App.Tests\IbkrManager.App.Tests.csproj", "{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{65197408-A22B-46B0-B79E-6671DB9F2A31}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{65197408-A22B-46B0-B79E-6671DB9F2A31}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{65197408-A22B-46B0-B79E-6671DB9F2A31}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{65197408-A22B-46B0-B79E-6671DB9F2A31}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B11C4477-E1C8-4411-8114-0AEAA12DE6EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B11C4477-E1C8-4411-8114-0AEAA12DE6EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B11C4477-E1C8-4411-8114-0AEAA12DE6EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B11C4477-E1C8-4411-8114-0AEAA12DE6EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F13E85FC-CCA9-43A0-B0D0-0157F235468B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F13E85FC-CCA9-43A0-B0D0-0157F235468B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F13E85FC-CCA9-43A0-B0D0-0157F235468B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F13E85FC-CCA9-43A0-B0D0-0157F235468B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{776D544D-492C-40C1-A217-C2CA3F25C6F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{776D544D-492C-40C1-A217-C2CA3F25C6F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{776D544D-492C-40C1-A217-C2CA3F25C6F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{776D544D-492C-40C1-A217-C2CA3F25C6F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{65197408-A22B-46B0-B79E-6671DB9F2A31} = {22CE072B-F3F3-47BA-BFD8-EF7E06A97C82}
+		{4DF176D4-494A-4FAA-BF80-206CBBBCBCAE} = {22CE072B-F3F3-47BA-BFD8-EF7E06A97C82}
+		{B11C4477-E1C8-4411-8114-0AEAA12DE6EC} = {22CE072B-F3F3-47BA-BFD8-EF7E06A97C82}
+		{F13E85FC-CCA9-43A0-B0D0-0157F235468B} = {EF5A0733-D8EE-484C-8727-570B9730157E}
+		{776D544D-492C-40C1-A217-C2CA3F25C6F9} = {EF5A0733-D8EE-484C-8727-570B9730157E}
+		{5059CFDC-00E6-4C1E-BA5B-46A17EF9447E} = {EF5A0733-D8EE-484C-8727-570B9730157E}
+	EndGlobalSection
+EndGlobal
