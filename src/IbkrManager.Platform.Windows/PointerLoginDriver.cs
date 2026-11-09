@@ -80,6 +80,10 @@ public sealed class PointerLoginDriver(
         var password = request.Password.Reveal();
         var typingDelay = request.Profile.TypingDelayMilliseconds;
 
+        // Text that is already on the login screen (warnings, legal notices) must not be mistaken for
+        // the app's answer to this login attempt.
+        var preexistingTexts = DescribeAppTexts(username, password).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var strategies = Strategies();
         var problems = new List<string>();
         var used = (string?)null;
@@ -119,23 +123,74 @@ public sealed class PointerLoginDriver(
 
         log.Info("Pointer login: credentials submitted; waiting for the app to react");
 
-        if (ui.WaitUntilLoginControlsGone(request.Profile.LoginResultTimeout, cancellationToken))
+        return await WaitForOutcomeAsync(request.Profile, username, password, preexistingTexts, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Waits for a verdict instead of assuming the first screen change means success. IBKR Desktop
+    /// replaces the login form with a "Connecting to server…" progress view while it talks to the
+    /// backend, and a refused login brings the form back with a message — or shows a dialog. Reporting
+    /// "awaiting 2FA" as soon as the form disappears would be wrong in both cases.
+    /// </summary>
+    private async Task<LoginResult> WaitForOutcomeAsync(
+        AppProfile profile,
+        string username,
+        string password,
+        HashSet<string> preexistingTexts,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + profile.LoginResultTimeout;
+        var sawProgress = false;
+
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            // A rejected login also makes the form disappear (error page or dialog), so report the
-            // app's answer instead of claiming it is waiting for a 2FA code.
-            var rejection = FindRejection(username, password);
-            if (rejection is not null)
+            var message = FindFailure(username, password, preexistingTexts);
+            if (message is not null)
             {
-                return LoginResult.Failed($"IBKR rejected the credentials: \"{rejection}\"");
+                return LoginResult.Failed($"IBKR reported: \"{message}\"");
             }
 
-            return LoginResult.AwaitingTwoFactor(
-                "Credentials submitted — enter the 2FA code in the app to finish logging in");
+            if (ui.FindLoginControls() is null && inspector?.Observe() is { } observation)
+            {
+                if (observation.Elements.Any(element => element.ControlType.Contains("Progress", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // "Connecting to server…" — keep polling for the real answer.
+                    sawProgress = true;
+                }
+                else
+                {
+                    var kind = UiClassifier.Classify(profile, observation.WindowTitle, observation);
+                    if (kind == WindowKind.TwoFactor)
+                    {
+                        return LoginResult.AwaitingTwoFactor(
+                            "Credentials accepted — enter the 2FA code in the app to finish logging in");
+                    }
+
+                    if (kind == WindowKind.LoggedIn && sawProgress)
+                    {
+                        return LoginResult.Submitted("IBKR accepted the credentials; the login screen is gone");
+                    }
+                }
+            }
+
+            try
+            {
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return LoginResult.Failed("Login cancelled");
+            }
         }
 
-        return LoginResult.Failed(
-            "the login form is still showing after the credentials were typed. " +
-            "Check the credentials, or log in manually." + DescribeApp(username, password));
+        return ui.FindLoginControls() is not null
+            ? LoginResult.Failed(
+                "the login form is still showing after the credentials were typed. Check the credentials, " +
+                "or log in manually." + DescribeApp(username, password))
+            : LoginResult.Failed(
+                $"IBKR did not answer within {profile.LoginResultTimeout.TotalSeconds:0} seconds; the app may still be " +
+                "connecting. Check the app window." + DescribeApp(username, password));
     }
 
     /// <summary>Real input first on an interactive desktop; posted messages always remain available.</summary>
@@ -321,13 +376,14 @@ public sealed class PointerLoginDriver(
 
     private static string Delivery(bool usePosted) => usePosted ? "posted messages" : "SendInput";
 
-    private static readonly System.Text.RegularExpressions.Regex RejectionText = new(
-        @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again",
+    private static readonly System.Text.RegularExpressions.Regex FailureText = new(
+        @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again|could\s+not|unable\s+to|timed\s+out|error",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    /// <summary>The app's message when it rejected the credentials, or null.</summary>
-    private string? FindRejection(params string[] secrets) =>
-        DescribeAppTexts(secrets).FirstOrDefault(text => RejectionText.IsMatch(text));
+    /// <summary>The app's own answer to this login attempt, or null when it has not answered yet.</summary>
+    private string? FindFailure(string username, string password, HashSet<string> preexistingTexts) =>
+        DescribeAppTexts(username, password)
+            .FirstOrDefault(text => !preexistingTexts.Contains(text) && FailureText.IsMatch(text));
 
     /// <summary>
     /// The app's own visible text, so a failure explains itself ("Please enter your username and

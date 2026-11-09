@@ -9,10 +9,12 @@ public sealed class PointerLoginDriverTests
         LoginResultTimeout = TimeSpan.Zero,
         LoginAutomationIdPatterns = ["launcherLoginWindow"],
         LoginButtonNames = ["Log In"],
+        TwoFactorAutomationIdPatterns = ["twoFactor"],
         TypingDelayMilliseconds = 0,
     };
 
-    private static LoginRequest Request() => new(new Secret("alice"), new Secret("secret"), Profile);
+    private static LoginRequest Request(AppProfile? profile = null) =>
+        new(new Secret("alice"), new Secret("secret"), profile ?? Profile);
 
     private static UiLoginControls LoginControls(
         UiBounds? username = null,
@@ -31,7 +33,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(controls: null);
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.NotApplicable);
         Assert.False(result.Success);
@@ -45,7 +47,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls());
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Empty(harness.Posted.Events);
@@ -58,7 +60,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls()) { Interactive = false };
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Empty(harness.Mouse.Clicks);
@@ -74,7 +76,7 @@ public sealed class PointerLoginDriverTests
         var harness = new Harness(LoginControls());
         harness.Ui.RealInputWorks = false;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.NotEmpty(harness.Posted.Events);
@@ -87,7 +89,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls());
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Empty(harness.Ui.SetCalls);
@@ -103,7 +105,6 @@ public sealed class PointerLoginDriverTests
             ],
             harness.Keyboard.Events);
 
-        Assert.Equal(1, harness.Ui.WaitCalls);
         Assert.Contains("2FA", result.Message);
     }
 
@@ -112,7 +113,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls(username: new UiBounds(10, 20, 100, 30)));
 
-        _ = await harness.Driver.LoginAsync(Request());
+        _ = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.Equal((60, 35), harness.Mouse.Clicks[0]);
     }
@@ -125,7 +126,7 @@ public sealed class PointerLoginDriverTests
         var harness = new Harness(LoginControls());
         harness.Ui.TabMovesFocus = false;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Contains((110, 240), harness.Mouse.Clicks);
@@ -140,7 +141,7 @@ public sealed class PointerLoginDriverTests
         harness.Ui.RealInputWorks = false;
         harness.Ui.PostedInputWorks = false;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("did not receive the typed username", result.Message);
@@ -155,7 +156,7 @@ public sealed class PointerLoginDriverTests
         var harness = new Harness(LoginControls());
         harness.Ui.AcceptsPasswordTyping = false;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("password field did not receive", result.Message);
@@ -169,7 +170,7 @@ public sealed class PointerLoginDriverTests
         harness.Keyboard.RejectText = true;
         harness.Posted.Reject = true;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("could not type the credentials", result.Message);
@@ -183,7 +184,7 @@ public sealed class PointerLoginDriverTests
         var harness = new Harness(LoginControls());
         harness.Mouse.RejectY = 300;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("login button", result.Message);
@@ -194,7 +195,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls(submit: new UiBounds(0, 0, 0, 0)));
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Single(harness.Mouse.Clicks);
@@ -206,7 +207,7 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls(submit: new UiBounds(0, 0, 0, 0))) { Interactive = false };
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Contains("key:13", harness.Posted.Events);
@@ -215,35 +216,68 @@ public sealed class PointerLoginDriverTests
     [Fact]
     public async Task Fails_when_the_form_stays_on_screen()
     {
-        var harness = new Harness(LoginControls());
-        harness.Ui.FormDisappears = false;
+        var harness = new Harness(LoginControls(), TimeSpan.FromMilliseconds(600));
+        harness.Ui.FormVisiblePollsAfterSubmit = int.MaxValue;
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("still showing", result.Message);
     }
 
     [Fact]
-    public async Task Includes_the_apps_own_message_in_the_failure()
+    public async Task Fails_when_the_app_only_shows_a_progress_bar()
+    {
+        var harness = new Harness(LoginControls(), TimeSpan.FromMilliseconds(600));
+        harness.Inspector.Elements = [new UiElementInfo("ProgressBar", string.Empty, "ProgressBar_QMLTYPE", false)];
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.False(result.Success);
+        Assert.Contains("did not answer", result.Message);
+    }
+
+    [Fact]
+    public async Task Reports_a_logged_in_result_after_the_connecting_screen()
     {
         var harness = new Harness(LoginControls());
-        harness.Ui.FormDisappears = false;
+        var calls = 0;
+        harness.Inspector.Provider = () => Interlocked.Increment(ref calls) <= 3
+            ? new UiObservation("IBKR Desktop", [new UiElementInfo("ProgressBar", string.Empty, "connecting", false)])
+            : new UiObservation(
+                "IBKR Desktop",
+                [
+                    new UiElementInfo("Pane", "Positions", "mainView", false),
+                    new UiElementInfo("Pane", "Orders", "ordersView", false),
+                    new UiElementInfo("Pane", "Account", "accountView", false),
+                ]);
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("accepted the credentials", result.Message);
+    }
+
+    [Fact]
+    public async Task Includes_the_apps_own_message_in_the_failure()
+    {
+        var harness = new Harness(LoginControls(), TimeSpan.FromMilliseconds(600));
+        harness.Ui.FormVisiblePollsAfterSubmit = int.MaxValue;
         harness.Inspector.Elements =
         [
-            new UiElementInfo("Text", "Please enter your username and password", string.Empty, false),
+            new UiElementInfo("Text", "Unexpected server condition", string.Empty, false),
             new UiElementInfo("Text", "secret-alice-value", string.Empty, false),
         ];
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
-        Assert.Contains("Please enter your username and password", result.Message);
+        Assert.Contains("Unexpected server condition", result.Message);
         Assert.DoesNotContain("secret-alice-value", result.Message);
     }
 
     [Fact]
-    public async Task Reports_a_rejection_instead_of_waiting_for_two_factor_when_the_form_disappears()
+    public async Task Reports_the_apps_rejection_instead_of_two_factor()
     {
         // A wrong password also removes the login form: the app's message must be reported.
         var harness = new Harness(LoginControls());
@@ -252,7 +286,7 @@ public sealed class PointerLoginDriverTests
             new UiElementInfo("Text", "Invalid username or password", string.Empty, false),
         ];
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.False(result.ReachedTwoFactor);
@@ -260,11 +294,28 @@ public sealed class PointerLoginDriverTests
     }
 
     [Fact]
+    public async Task Ignores_text_that_was_already_on_the_login_screen()
+    {
+        // The CI login page carries a "Hardware not supported" error banner; it is not the answer to
+        // this login attempt.
+        var harness = new Harness(LoginControls());
+        harness.Inspector.Elements =
+        [
+            new UiElementInfo("Text", "Error: Hardware not supported", string.Empty, false),
+            new UiElementInfo("Group", string.Empty, "launcherTwoFactorWindow", false),
+        ];
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.True(result.ReachedTwoFactor, result.Message);
+    }
+
+    [Fact]
     public async Task Does_not_click_fields_without_a_screen_rectangle()
     {
         var harness = new Harness(LoginControls(username: new UiBounds(0, 0, 0, 0)));
 
-        var result = await harness.Driver.LoginAsync(Request());
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
 
         Assert.False(result.Success);
         Assert.Contains("cannot be clicked", result.Message);
@@ -273,8 +324,12 @@ public sealed class PointerLoginDriverTests
 
     private sealed class Harness
     {
-        public Harness(UiLoginControls? controls)
+        public Harness(UiLoginControls? controls, TimeSpan? loginTimeout = null)
         {
+            Profile = PointerLoginDriverTests.Profile with
+            {
+                LoginResultTimeout = loginTimeout ?? TimeSpan.FromSeconds(5),
+            };
             Ui = new FakeUi { Controls = controls };
             Keyboard = new RecordingKeyboard { Ui = Ui };
             Mouse = new RecordingMouse { Ui = Ui };
@@ -290,6 +345,8 @@ public sealed class PointerLoginDriverTests
                 Inspector);
         }
 
+        public AppProfile Profile { get; }
+
         public FakeUi Ui { get; }
 
         public RecordingKeyboard Keyboard { get; }
@@ -298,7 +355,10 @@ public sealed class PointerLoginDriverTests
 
         public RecordingPostedInput Posted { get; }
 
-        public FakeInspector Inspector { get; } = new();
+        public FakeInspector Inspector { get; } = new()
+        {
+            Elements = [new UiElementInfo("Group", string.Empty, "launcherTwoFactorWindow", false)],
+        };
 
         public bool Interactive { get; init; } = true;
 
@@ -309,7 +369,10 @@ public sealed class PointerLoginDriverTests
     {
         public IReadOnlyList<UiElementInfo> Elements { get; set; } = [];
 
-        public UiObservation? Observe() => new("IBKR Desktop", Elements);
+        /// <summary>Optional scripted snapshots, for tests that need a sequence (progress → result).</summary>
+        public Func<UiObservation?>? Provider { get; set; }
+
+        public UiObservation? Observe() => Provider?.Invoke() ?? new UiObservation("IBKR Desktop", Elements);
     }
 
     /// <summary>Models the QML form: what has focus, and what each field currently contains.</summary>
@@ -337,7 +400,28 @@ public sealed class PointerLoginDriverTests
 
         public int WaitCalls { get; private set; }
 
-        public UiLoginControls? FindLoginControls() => Controls;
+        /// <summary>How many polls after submitting still see the login form.</summary>
+        public int FormVisiblePollsAfterSubmit { get; set; }
+
+        private bool _submitted;
+        private int _pollsAfterSubmit;
+
+        public void Submitted()
+        {
+            _submitted = true;
+            _pollsAfterSubmit = 0;
+        }
+
+        public UiLoginControls? FindLoginControls()
+        {
+            if (!_submitted)
+            {
+                return Controls;
+            }
+
+            _pollsAfterSubmit++;
+            return _pollsAfterSubmit <= FormVisiblePollsAfterSubmit ? Controls : null;
+        }
 
         public string? GetFieldValue(int index) => Values.GetValueOrDefault(index) ?? string.Empty;
 
@@ -356,6 +440,15 @@ public sealed class PointerLoginDriverTests
         {
             WaitCalls++;
             return FormDisappears;
+        }
+
+        /// <summary>True when the point is inside the login button.</summary>
+        public bool IsSubmitPoint(int x, int y)
+        {
+            var bounds = Controls?.SubmitBounds ?? default;
+            return !bounds.IsEmpty &&
+                   x >= bounds.Left && x <= bounds.Left + bounds.Width &&
+                   y >= bounds.Top && y <= bounds.Top + bounds.Height;
         }
 
         /// <summary>Which field the given screen position would focus, or -1.</summary>
@@ -445,6 +538,9 @@ public sealed class PointerLoginDriverTests
                 case 0x09:
                     Ui.Tab();
                     break;
+                case 0x0D:
+                    Ui.Submitted();
+                    break;
             }
 
             return true;
@@ -478,6 +574,12 @@ public sealed class PointerLoginDriverTests
             }
 
             Clicks.Add((x, y));
+            if (Ui is { } clicked && clicked.IsSubmitPoint(x, y))
+            {
+                clicked.Submitted();
+                return true;
+            }
+
             if (Ui is not { RealInputWorks: true })
             {
                 return true;
@@ -509,6 +611,12 @@ public sealed class PointerLoginDriverTests
             }
 
             Events.Add($"click:{x},{y}");
+            if (Ui is { } clicked && clicked.IsSubmitPoint(x, y))
+            {
+                clicked.Submitted();
+                return true;
+            }
+
             if (Ui is not { PostedInputWorks: true })
             {
                 return true;
@@ -559,6 +667,9 @@ public sealed class PointerLoginDriverTests
                     break;
                 case 0x09:
                     Ui.Tab();
+                    break;
+                case 0x0D:
+                    Ui.Submitted();
                     break;
             }
 

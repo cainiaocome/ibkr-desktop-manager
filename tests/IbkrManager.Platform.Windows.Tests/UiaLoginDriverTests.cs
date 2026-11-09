@@ -145,5 +145,6 @@ public sealed class UiaLoginDriverTests
             WaitCalls++;
             return FormDisappears;
         }
+
     }
 }

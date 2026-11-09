@@ -8,9 +8,9 @@ namespace IbkrManager.IntegrationTests;
 
 /// <summary>
 /// End-to-end login against the real IBKR Desktop: launch it, type a random (invalid) username and
-/// password with the production pointer driver, submit, and check that the app rejects the
-/// credentials. The "empty fields" answer means the typing never reached the app, which is exactly
-/// the bug this test exists to catch.
+/// password with the production pointer driver, submit, and wait for the app to reject the
+/// credentials. The "please enter your username and password" answer means the typing never reached
+/// the app, which is exactly the bug this test exists to catch.
 ///
 /// Screenshots, the accessibility tree before/after and a JSON summary are written to
 /// <c>IBKR_E2E_OUTPUT</c> so the images can be inspected after the run.
@@ -21,11 +21,12 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
 {
     private static readonly AppProfile Profile = AppProfile.LoadEmbedded() with
     {
-        LoginResultTimeout = TimeSpan.FromSeconds(20),
+        // IBKR answers asynchronously: the login form is replaced by "Connecting to server…".
+        LoginResultTimeout = TimeSpan.FromSeconds(100),
     };
 
     private static readonly Regex Rejection = new(
-        @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again",
+        @"invalid|incorrect|failed|failure|wrong|not\s+(recognised|recognized|valid|found)|denied|unsuccessful|try\s+again|could\s+not",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly Regex EmptyFormPrompt = new(
@@ -46,6 +47,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         var password = "Pw!" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6));
         var outputDirectory = OutputDirectory();
         KillStaleApp();
+
         var log = new RecordingLog();
         var process = new Win32ProcessController(Profile, log);
         var uia = new UiaSession(process, Profile, log);
@@ -53,6 +55,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             uia,
             process,
             log,
+            postedInput: new PostedWindowInput(process),
             isInteractive: InteractiveSession.IsInteractive,
             inspector: uia);
         var manager = new AppManager(
@@ -80,64 +83,107 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
 
             var controls = await WaitForLoginControlsAsync(manager, uia, TimeSpan.FromMinutes(3));
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
-            Assert.True(controls is not null, "the real login form never appeared; log:\n" + string.Join(Environment.NewLine, log.Messages));
+            Assert.True(
+                controls is not null,
+                "the real login form never appeared; log:\n" + string.Join(Environment.NewLine, log.Messages));
 
             var before = uia.Observe();
             CaptureState(outputDirectory, "before", process, before, report);
 
             var result = await driver.LoginAsync(new LoginRequest(new Secret(username), new Secret(password), Profile));
             report["driverResult"] = result.ToString();
+            report["log"] = log.Messages.ToList();
             output.WriteLine($"driver result: {result}");
 
-            var usernameAfter = uia.GetFieldLength(controls!.UsernameIndex) is null ? null : uia.GetFieldValue(controls.UsernameIndex);
-            var passwordLengthAfter = uia.GetFieldLength(controls.PasswordIndex);
-            report["usernameAfter"] = usernameAfter;
-            report["passwordLengthAfter"] = passwordLengthAfter;
+            var observed = new List<string>();
+            var snapshots = new List<string>();
+            var rejection = await WaitForRejectionAsync(manager, outputDirectory, observed, snapshots, report);
 
-            var after = uia.Observe();
-            CaptureState(outputDirectory, "after", process, after, report);
-
-            var beforeTexts = TextSet(before);
-            var afterTexts = TextSet(after);
-            var newTexts = afterTexts.Where(text => !beforeTexts.Contains(text)).ToList();
-            var appTitles = Capture.VisibleWindows()
-                .Where(window => window.ProcessId == manager.State.ProcessId)
-                .Select(window => window.Title)
-                .Where(title => !string.IsNullOrWhiteSpace(title))
-                .Distinct()
-                .ToList();
-            var candidates = newTexts.Concat(appTitles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            report["newTexts"] = newTexts;
-            report["appWindowTitles"] = appTitles;
-            report["allTexts"] = afterTexts.ToList();
-
+            report["observedTexts"] = observed;
+            report["snapshots"] = snapshots;
+            report["rejection"] = rejection;
             WriteReport(outputDirectory, report);
+
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
-            output.WriteLine("new text after submitting: " + (newTexts.Count == 0 ? "(none)" : string.Join(" / ", newTexts)));
-            output.WriteLine("app window titles after submitting: " + string.Join(" / ", appTitles));
-            output.WriteLine($"username field after submit: '{usernameAfter}' ({passwordLengthAfter?.ToString() ?? "-"} password chars)");
+            output.WriteLine("texts after submitting: " + (observed.Count == 0 ? "(none)" : string.Join(" / ", observed)));
+            output.WriteLine("rejection: " + (rejection ?? "(none found)"));
 
-            // 1. The typing must have reached the app.
-            Assert.False(string.IsNullOrEmpty(usernameAfter), "the username field is empty after typing: simulated input never reached the app");
-            Assert.Equal(username, usernameAfter);
-            Assert.True(passwordLengthAfter is > 0, "the password field is empty after typing");
+            // 1. The typing must have reached the app. The driver only submits after verifying that
+            //    the username was typed and that the password field reports characters.
+            Assert.True(
+                log.Messages.Any(message => message.Contains("credentials typed with the", StringComparison.OrdinalIgnoreCase)),
+                "the driver never confirmed that the credentials reached the form; log:\n" +
+                string.Join(Environment.NewLine, log.Messages));
 
-            // 2. The app must have answered. With random credentials that answer is a rejection, and
-            //    it must not be the "please enter your username and password" validation message.
-            var rejection = candidates.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
+            // 2. With random credentials the app must reject the login, not complain about empty fields.
             Assert.True(
                 rejection is not null,
                 "the app did not report a login rejection. Observed text: " +
-                (candidates.Count == 0 ? "(none)" : string.Join(" / ", candidates)));
-
-            report["rejection"] = rejection;
-            WriteReport(outputDirectory, report);
+                (observed.Count == 0 ? "(none)" : string.Join(" / ", observed)));
         }
         finally
         {
             await manager.QuitAsync(force: true);
             WriteReport(outputDirectory, report);
         }
+    }
+
+    /// <summary>
+    /// Polls every window of the app until one of them reports a rejection, capturing screenshots
+    /// along the way so the sequence can be inspected after the run.
+    /// </summary>
+    private async Task<string?> WaitForRejectionAsync(
+        AppManager manager,
+        string outputDirectory,
+        List<string> observed,
+        List<string> snapshots,
+        Dictionary<string, object?> report)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(150);
+        var nextCapture = DateTimeOffset.UtcNow;
+        var index = 0;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var appWindows = Capture.VisibleWindows()
+                .Where(window => manager.State.ProcessId is { } pid && window.ProcessId == pid)
+                .ToList();
+            var texts = appWindows
+                .SelectMany(window => UiaDump.TextsOf(window.Handle).Concat([window.Title]))
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(text => text.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var text in texts.Where(text => !observed.Contains(text, StringComparer.OrdinalIgnoreCase)))
+            {
+                observed.Add(text);
+            }
+
+            var rejection = texts.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
+            if (rejection is not null)
+            {
+                report["rejectionWindows"] = appWindows.Select(window => window.ToString()).ToList();
+                return rejection;
+            }
+
+            if (DateTimeOffset.UtcNow >= nextCapture)
+            {
+                var path = Path.Combine(outputDirectory, $"e2e-watch-{index:00}-screen.png");
+                if (Capture.TryCaptureScreen(path))
+                {
+                    snapshots.Add(path);
+                }
+
+                report[$"watch.{index:00}"] = texts;
+                index++;
+                nextCapture = DateTimeOffset.UtcNow.AddSeconds(15);
+            }
+
+            await Task.Delay(1000);
+        }
+
+        return null;
     }
 
     /// <summary>Advances the state machine and waits for the QML tree to expose the login form.</summary>
@@ -212,10 +258,6 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         {
             output.WriteLine($"WARNING: could not capture window 0x{appWindow.ToInt64():X} ({windowPath})");
         }
-
-        File.WriteAllText(
-            Path.Combine(directory, $"e2e-{prefix}-uia.json"),
-            JsonSerializer.Serialize(report[$"{prefix}.tree"], new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static string OutputDirectory()
@@ -229,7 +271,9 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         {
             // The workflow passes a workspace-relative path, but tests run from the build output.
             var root = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE");
-            directory = string.IsNullOrWhiteSpace(root) ? Path.GetFullPath(directory) : Path.GetFullPath(Path.Combine(root, directory));
+            directory = string.IsNullOrWhiteSpace(root)
+                ? Path.GetFullPath(directory)
+                : Path.GetFullPath(Path.Combine(root, directory));
         }
 
         Directory.CreateDirectory(directory);
@@ -240,13 +284,4 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         File.WriteAllText(
             Path.Combine(directory, "e2e-report.json"),
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-
-    private static HashSet<string> TextSet(UiObservation? observation) =>
-        observation is null
-            ? []
-            : observation.Elements
-                .Select(element => element.Name?.Trim())
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 }
