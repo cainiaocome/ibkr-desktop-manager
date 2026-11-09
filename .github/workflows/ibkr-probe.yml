@@ -64,6 +64,7 @@ jobs:
         shell: pwsh
         env:
           IBKR_REAL_APP: '1'
+          IBKR_E2E_OUTPUT: TestResults/e2e
         run: |
           dotnet restore IbkrDesktopManager.sln
           dotnet build tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj -c Release --no-restore
@@ -79,5 +80,6 @@ jobs:
           path: |
             artifacts/ibkr-probe/**
             TestResults/real-app/**/*.trx
+            TestResults/e2e/**
           if-no-files-found: warn
           retention-days: 30

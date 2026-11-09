@@ -37,6 +37,12 @@ public interface IUiLoginUi
     /// </summary>
     string? GetFieldValue(int index);
 
+    /// <summary>
+    /// Number of characters in a field (null when unreadable). Safe to use on a password field: only
+    /// the length escapes, the text is discarded inside the implementation.
+    /// </summary>
+    int? GetFieldLength(int index);
+
     /// <summary>Writes a field's accessibility value directly. Not all toolkits propagate it.</summary>
     bool SetField(int index, string value);
 

@@ -43,7 +43,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
         var driver = new SelectingLoginDriver(
             () => SettingsStore.Load().LoginDriver,
             new LoginDriverChain(
-                new PointerLoginDriver(uia, _process, Log),
+                new PointerLoginDriver(uia, _process, Log, inspector: uia),
                 new UiaLoginDriver(uia, Log),
                 new SendInputLoginDriver(_process, SystemClock.Instance, Log)),
             new ManualLoginDriver());

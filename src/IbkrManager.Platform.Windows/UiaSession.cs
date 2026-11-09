@@ -73,6 +73,24 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
     }
 
+    public int? GetFieldLength(int index)
+    {
+        if (!CanUse())
+        {
+            return null;
+        }
+
+        try
+        {
+            return OnSta(() => GetFieldValueCore(index)?.Length);
+        }
+        catch (Exception ex) when (IsUiaFailure(ex))
+        {
+            log.Warn($"UI Automation value read failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public bool SetField(int index, string value)
     {
         if (!CanUse())
