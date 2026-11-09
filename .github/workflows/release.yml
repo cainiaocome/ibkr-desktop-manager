@@ -51,7 +51,7 @@ jobs:
         run: >
           dotnet test IbkrDesktopManager.sln -c Release --no-build
           -p:Version=${{ steps.version.outputs.version }}
-          --logger "trx;LogFileName=results.trx"
+          --logger "trx"
           --results-directory TestResults
 
       - name: Publish

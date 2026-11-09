@@ -51,7 +51,7 @@ jobs:
       - name: Test
         run: >
           dotnet test IbkrDesktopManager.sln -c Release --no-build
-          --logger "trx;LogFileName=results.trx"
+          --logger "trx"
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
 
