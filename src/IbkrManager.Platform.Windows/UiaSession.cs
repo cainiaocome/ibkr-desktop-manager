@@ -175,7 +175,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         // level deep only. That keeps a logged-in window from being traversed at all.
         var depth = IsLoginWindow(root) ? DeepDepth : ShallowDepth;
         var nodes = Walk(automation, root, depth);
-        return new UiObservation(root.CachedName, nodes.Select(Describe).ToList());
+        return new UiObservation(root.CurrentName, nodes.Select(Describe).ToList());
     }
 
     private UiLoginControls? FindLoginControlsCore()
@@ -189,8 +189,8 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
 
         var nodes = Walk(automation, root, IsLoginWindow(root) ? DeepDepth : ShallowDepth);
         var loginButton = nodes.FirstOrDefault(node =>
-            node.Element.CachedControlType == UIA_ControlTypeIds.UIA_ButtonControlTypeId &&
-            Matches(node.Element.CachedName, profile.LoginButtonNames));
+            node.ControlType == UIA_ControlTypeIds.UIA_ButtonControlTypeId &&
+            Matches(node.Element.CurrentName, profile.LoginButtonNames));
 
         if (!IsLoginWindow(root) && loginButton is null)
         {
@@ -198,7 +198,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
 
         var edits = nodes
-            .Where(node => node.Element.CachedControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
+            .Where(node => node.ControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
             .ToList();
 
         if (edits.Count < 2)
@@ -207,8 +207,8 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
             return null;
         }
 
-        var passwordIndex = edits.FindIndex(node => node.Element.CachedIsPassword != 0);
-        var usernameIndex = edits.FindIndex(node => node.Element.CachedIsPassword == 0);
+        var passwordIndex = edits.FindIndex(node => node.Element.CurrentIsPassword != 0);
+        var usernameIndex = edits.FindIndex(node => node.Element.CurrentIsPassword == 0);
         if (usernameIndex < 0)
         {
             usernameIndex = 0;
@@ -224,7 +224,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
             usernameIndex,
             passwordIndex,
             loginButton is not null,
-            $"window='{root.CachedName}' root='{root.CachedAutomationId}' edits={edits.Count}" +
+            $"window='{root.CurrentName}' root='{root.CurrentAutomationId}' edits={edits.Count}" +
             $" username={ToBounds(edits[usernameIndex].Element)} password={ToBounds(edits[passwordIndex].Element)}" +
             $" submit={ToBounds(loginButton?.Element)}",
             ToBounds(edits[usernameIndex].Element),
@@ -242,7 +242,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
 
         var edits = Walk(automation, root, DeepDepth)
-            .Where(node => node.Element.CachedControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
+            .Where(node => node.ControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
             .ToList();
 
         if (index < 0 || index >= edits.Count)
@@ -265,7 +265,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
 
         var edits = Walk(automation, root, DeepDepth)
-            .Where(node => node.Element.CachedControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
+            .Where(node => node.ControlType == UIA_ControlTypeIds.UIA_EditControlTypeId)
             .ToList();
 
         if (index < 0 || index >= edits.Count)
@@ -294,12 +294,12 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         }
 
         var buttons = Walk(automation, root, DeepDepth)
-            .Where(node => node.Element.CachedControlType == UIA_ControlTypeIds.UIA_ButtonControlTypeId)
+            .Where(node => node.ControlType == UIA_ControlTypeIds.UIA_ButtonControlTypeId)
             .ToList();
 
         foreach (var button in buttons)
         {
-            if (!Matches(button.Element.CachedName, profile.LoginButtonNames))
+            if (!Matches(button.Element.CurrentName, profile.LoginButtonNames))
             {
                 continue;
             }
@@ -333,26 +333,30 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
     }
 
     private bool IsLoginWindow(IUIAutomationElement root) =>
-        Matches(root.CachedAutomationId, profile.LoginAutomationIdPatterns);
+        Matches(root.CurrentAutomationId, profile.LoginAutomationIdPatterns);
 
     private static bool Matches(string? value, IReadOnlyList<string> patterns) =>
         !string.IsNullOrEmpty(value) &&
         patterns.Any(pattern => !string.IsNullOrWhiteSpace(pattern) &&
                                 value.Contains(pattern, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Breadth-first walk with a depth and node budget; only containers are expanded.</summary>
+    /// <summary>
+    /// Breadth-first walk with a depth and node budget; only containers are expanded. Qt's provider
+    /// does not implement the cached-query APIs (they fail with E_INVALIDARG), so properties are read
+    /// one by one — which is exactly why the budget matters.
+    /// </summary>
     private static List<Node> Walk(CUIAutomation automation, IUIAutomationElement root, int maxDepth)
     {
-        var cache = CreateCacheRequest(automation);
         var trueCondition = automation.CreateTrueCondition();
-        var nodes = new List<Node> { new(root, 0) };
+        var rootNode = new Node(root, 0, root.CurrentControlType);
+        var nodes = new List<Node> { rootNode };
         var queue = new Queue<Node>();
-        queue.Enqueue(nodes[0]);
+        queue.Enqueue(rootNode);
 
         while (queue.Count > 0 && nodes.Count < MaxElements)
         {
             var node = queue.Dequeue();
-            if (node.Depth >= maxDepth || !IsContainer(node.Element.CachedControlType))
+            if (node.Depth >= maxDepth || !IsContainer(node.ControlType))
             {
                 continue;
             }
@@ -360,7 +364,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
             IUIAutomationElementArray children;
             try
             {
-                children = node.Element.FindAllBuildCache(TreeScope.TreeScope_Children, trueCondition, cache);
+                children = node.Element.FindAll(TreeScope.TreeScope_Children, trueCondition);
             }
             catch (COMException)
             {
@@ -376,28 +380,13 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
                     continue;
                 }
 
-                var next = new Node(child, node.Depth + 1);
+                var next = new Node(child, node.Depth + 1, child.CurrentControlType);
                 nodes.Add(next);
                 queue.Enqueue(next);
             }
         }
 
         return nodes;
-    }
-
-    /// <summary>One round trip per element instead of one per property.</summary>
-    private static IUIAutomationCacheRequest CreateCacheRequest(CUIAutomation automation)
-    {
-        var cache = automation.CreateCacheRequest();
-        // FindAllBuildCache requires the request's own scope; without it UIA rejects the call with
-        // "Value does not fall within the expected range".
-        cache.TreeScope = TreeScope.TreeScope_Subtree;
-        cache.AddProperty(UIA_PropertyIds.UIA_ControlTypePropertyId);
-        cache.AddProperty(UIA_PropertyIds.UIA_NamePropertyId);
-        cache.AddProperty(UIA_PropertyIds.UIA_AutomationIdPropertyId);
-        cache.AddProperty(UIA_PropertyIds.UIA_IsPasswordPropertyId);
-        cache.AddProperty(UIA_PropertyIds.UIA_BoundingRectanglePropertyId);
-        return cache;
     }
 
     private static bool IsContainer(int controlType) => controlType is
@@ -409,10 +398,10 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         UIA_ControlTypeIds.UIA_TableControlTypeId;
 
     private static UiElementInfo Describe(Node node) => new(
-        ControlTypeName(node.Element.CachedControlType),
-        node.Element.CachedName ?? string.Empty,
-        node.Element.CachedAutomationId ?? string.Empty,
-        node.Element.CachedIsPassword != 0);
+        ControlTypeName(node.ControlType),
+        node.Element.CurrentName ?? string.Empty,
+        node.Element.CurrentAutomationId ?? string.Empty,
+        node.Element.CurrentIsPassword != 0);
 
     private static UiBounds ToBounds(IUIAutomationElement? element)
     {
@@ -421,7 +410,7 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
             return default;
         }
 
-        var rect = element.CachedBoundingRectangle;
+        var rect = element.CurrentBoundingRectangle;
         return new UiBounds(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
     }
 
@@ -485,5 +474,5 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
         return result;
     }
 
-    private sealed record Node(IUIAutomationElement Element, int Depth);
+    private sealed record Node(IUIAutomationElement Element, int Depth, int ControlType);
 }
