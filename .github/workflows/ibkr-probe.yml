@@ -1,0 +1,82 @@
+name: IBKR Desktop probe
+
+# Installs the real IBKR Desktop and checks the assumptions the manager ships with: install
+# discovery, login-window title/classification, and what UI Automation exposes on that window.
+# It never logs in and never submits credentials.
+
+on:
+  workflow_dispatch:
+    inputs:
+      launch_timeout_seconds:
+        description: How long to wait for the login window
+        default: '240'
+      skip_install:
+        description: Reuse an existing installation (useful with a preinstalled runner)
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ibkr-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: install, launch, inspect
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The "latest" installer URL is stable, so keep the 208 MB download between runs.
+      - name: Cache the IBKR installer
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/ibkr-installer
+          key: ibkr-installer-${{ github.run_id }}
+          restore-keys: ibkr-installer-
+
+      - name: Probe installation, windows and UI Automation
+        shell: powershell
+        run: |
+          $probeArgs = @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', 'scripts/probe-ibkr.ps1',
+            '-OutputDirectory', 'artifacts/ibkr-probe',
+            '-LaunchTimeoutSeconds', '${{ inputs.launch_timeout_seconds || 240 }}'
+          )
+          if ('${{ inputs.skip_install }}' -eq 'true') { $probeArgs += '-SkipInstall' }
+          & powershell.exe @probeArgs
+          exit $LASTEXITCODE
+
+      - name: Verify with the production locator and profile
+        if: always()
+        shell: pwsh
+        env:
+          IBKR_REAL_APP: '1'
+        run: |
+          dotnet build tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj -c Release
+          dotnet test tests/IbkrManager.IntegrationTests/IbkrManager.IntegrationTests.csproj `
+            -c Release --no-build --filter "Category=RealIbkDesktop" `
+            --logger "trx" --results-directory TestResults/real-app
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ibkr-probe-${{ github.run_number }}
+          path: |
+            artifacts/ibkr-probe/**
+            TestResults/real-app/**/*.trx
+          if-no-files-found: warn
+          retention-days: 30
