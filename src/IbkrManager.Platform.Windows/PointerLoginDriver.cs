@@ -2,25 +2,25 @@ namespace IbkrManager.Platform.Windows;
 
 /// <summary>
 /// Drives the login form like a person does: UI Automation is used only to *locate* the fields and
-/// their screen rectangles, then the driver clicks each field with the mouse and types the value with
-/// real keystrokes.
+/// their screen rectangles, then the driver clicks each field and types into it.
 ///
 /// This is the preferred driver for IBKR Desktop. It is a Qt/QML app whose text fields accept
 /// <c>ValuePattern.SetValue</c> without updating the QML <c>text</c> property the form validates, so
 /// assigning values makes the fields look filled while the app still reports "no username and
-/// password". Synthetic clicks and keystrokes enter through Qt's normal input pipeline and therefore
-/// behave exactly like a human typing.
+/// password". Clicks and keystrokes enter through Qt's normal input pipeline instead.
+///
+/// Two delivery strategies are tried in order, and the first one that visibly fills the form wins:
+/// <list type="number">
+/// <item><c>sendinput</c> — real mouse and keyboard events. Preferred, but Windows discards them in a
+/// session without an input desktop and UIPI blocks them when the app runs elevated.</item>
+/// <item><c>posted</c> — mouse and character messages posted to the app window. Works in service
+/// sessions and across elevation because the app's own message loop delivers them.</item>
+/// </list>
 ///
 /// Every step is verified, because a form that merely *looks* filled is the failure mode that
-/// produced this driver:
-/// <list type="bullet">
-/// <item>the username is read back and must match what was typed;</item>
-/// <item>after typing the password, the username must still be intact (proving focus moved instead of
-/// the password being appended to the username field) and the password field must report at least
-/// one character;</item>
-/// <item>the password is never read back, only its length.</item>
-/// </list>
-/// When the form is still on screen afterwards, the app's own message is included in the error.
+/// produced this driver: the username is read back, the password field must report characters, and
+/// the username must still be intact afterwards (proving focus moved instead of the password landing
+/// in the username field). The password itself is never read back, only its length.
 /// </summary>
 public sealed class PointerLoginDriver(
     IUiLoginUi ui,
@@ -28,7 +28,8 @@ public sealed class PointerLoginDriver(
     IAppLog log,
     IKeyboardInput? keyboard = null,
     IMouseInput? mouse = null,
-    Func<bool>? canInject = null,
+    IPostedInput? postedInput = null,
+    Func<bool>? isInteractive = null,
     IWindowInspector? inspector = null) : ILoginDriver
 {
     /// <summary>Time for the window manager to settle after the window is raised.</summary>
@@ -37,24 +38,22 @@ public sealed class PointerLoginDriver(
     /// <summary>Time for the toolkit to move the caret after a click.</summary>
     private static readonly TimeSpan ClickDelay = TimeSpan.FromMilliseconds(150);
 
+    /// <summary>Time for the form to process posted messages between steps.</summary>
+    private static readonly TimeSpan PostedDelay = TimeSpan.FromMilliseconds(120);
+
     /// <summary>Time for the form to re-enable its button after the last character landed.</summary>
     private static readonly TimeSpan SubmitDelay = TimeSpan.FromMilliseconds(400);
 
     private readonly IKeyboardInput _keyboard = keyboard ?? new SendInputKeyboard();
     private readonly IMouseInput _mouse = mouse ?? new SendInputMouse();
-    private readonly Func<bool> _canInject = canInject ?? InteractiveSession.IsInteractive;
+    private readonly IPostedInput _posted = postedInput ?? new PostedWindowInput(process);
+    private readonly Func<bool> _isInteractive = isInteractive ?? InteractiveSession.IsInteractive;
 
     public string Name => "pointer";
 
     public async Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        if (!_canInject())
-        {
-            return LoginResult.DoesNotApply(
-                $"this session cannot deliver synthetic mouse and keyboard input ({InteractiveSession.Describe()})");
-        }
 
         var controls = ui.FindLoginControls();
         if (controls is null)
@@ -72,7 +71,7 @@ public sealed class PointerLoginDriver(
 
         if (!process.TryFocusMainWindow())
         {
-            log.Warn("Pointer login: could not raise the IBKR Desktop window; typing into whatever has focus");
+            log.Warn("Pointer login: could not raise the IBKR Desktop window; the app may not be focused");
         }
 
         await Task.Delay(FocusDelay, cancellationToken).ConfigureAwait(false);
@@ -81,24 +80,44 @@ public sealed class PointerLoginDriver(
         var password = request.Password.Reveal();
         var typingDelay = request.Profile.TypingDelayMilliseconds;
 
-        var problem = await FillFieldsAsync(controls, username, password, typingDelay, cancellationToken)
-            .ConfigureAwait(false);
-        if (problem is not null)
+        var strategies = Strategies();
+        var problems = new List<string>();
+        var used = (string?)null;
+        foreach (var strategy in strategies)
         {
-            return LoginResult.Failed(problem + DescribeApp(username, password));
+            var problem = await FillFieldsAsync(controls, username, password, typingDelay, strategy == "posted", cancellationToken)
+                .ConfigureAwait(false);
+            if (problem is null)
+            {
+                used = strategy;
+                break;
+            }
+
+            problems.Add($"{strategy}: {problem}");
         }
+
+        if (used is null)
+        {
+            log.Warn($"Pointer login: every input strategy failed: {string.Join(" | ", problems)}");
+            return LoginResult.Failed(
+                "could not type the credentials into the app. " + string.Join(" ", problems) +
+                DescribeApp(username, password));
+        }
+
+        log.Info($"Pointer login: credentials typed with the {used} strategy");
 
         await Task.Delay(SubmitDelay, cancellationToken).ConfigureAwait(false);
 
-        if (!SubmitLogin(controls))
+        var usePosted = used == "posted";
+        if (!SubmitLogin(controls, usePosted))
         {
             return LoginResult.Failed(
                 controls.SubmitBounds.IsEmpty
-                    ? $"Windows rejected the Enter key (SendInput error {_keyboard.LastError})"
-                    : $"Windows rejected the simulated click on the login button (mouse error {_mouse.LastError})");
+                    ? "Windows rejected the Enter key"
+                    : "Windows rejected the click on the login button");
         }
 
-        log.Info("Pointer login: credentials typed and submitted; waiting for the app to react");
+        log.Info("Pointer login: credentials submitted; waiting for the app to react");
 
         if (ui.WaitUntilLoginControlsGone(request.Profile.LoginResultTimeout, cancellationToken))
         {
@@ -111,16 +130,27 @@ public sealed class PointerLoginDriver(
             "Check the credentials, or log in manually." + DescribeApp(username, password));
     }
 
-    /// <summary>Fills both fields, verifying that each one actually received its characters.</summary>
+    /// <summary>Real input first on an interactive desktop; posted messages always remain available.</summary>
+    private IEnumerable<string> Strategies()
+    {
+        if (_isInteractive())
+        {
+            yield return "sendinput";
+        }
+
+        yield return "posted";
+    }
+
+    /// <summary>Fills both fields with one strategy, verifying that each received its characters.</summary>
     private async Task<string?> FillFieldsAsync(
         UiLoginControls controls,
         string username,
         string password,
         int typingDelayMilliseconds,
+        bool usePosted,
         CancellationToken cancellationToken)
     {
-        // Username: click, replace the contents, type.
-        var problem = await ClickAndTypeAsync(controls.UsernameBounds, username, typingDelayMilliseconds, cancellationToken)
+        var problem = await ClickAndTypeAsync(controls.UsernameIndex, controls.UsernameBounds, username, typingDelayMilliseconds, usePosted, cancellationToken)
             .ConfigureAwait(false);
         if (problem is not null)
         {
@@ -129,39 +159,28 @@ public sealed class PointerLoginDriver(
 
         if (!string.Equals(ui.GetFieldValue(controls.UsernameIndex), username, StringComparison.Ordinal))
         {
-            log.Warn($"Pointer login: the username field reports {ui.GetFieldLength(controls.UsernameIndex)?.ToString() ?? "unreadable"} character(s) after typing {username.Length}");
-            return "the app did not receive the typed username, so simulated keyboard input is not reaching it. " +
-                   "Make sure the IBKR Desktop window is visible, not covered by a UAC prompt, and running at the " +
-                   "same privilege level as this manager.";
+            return "the app did not receive the typed username.";
         }
 
-        // Password: Tab moves focus like a human would; fall back to clicking if that did not land.
+        // Password: Tab moves focus like a human would; fall back to clicking when that did not land.
         for (var attempt = 0; attempt < 2; attempt++)
         {
             if (attempt == 0)
             {
-                if (!_keyboard.SendKeyPress(NativeMethods.VK_TAB))
+                if (!await MoveFocusToPasswordAsync(controls, password, typingDelayMilliseconds, usePosted, cancellationToken)
+                        .ConfigureAwait(false))
                 {
-                    log.Warn("Pointer login: Tab was rejected; clicking the password field instead");
-                    problem = await ClickPasswordAsync(controls, password, typingDelayMilliseconds, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                else
-                {
-                    await Task.Delay(ClickDelay, cancellationToken).ConfigureAwait(false);
-                    problem = await ClearAndTypeAsync(password, typingDelayMilliseconds, cancellationToken)
-                        .ConfigureAwait(false);
+                    return $"{Delivery(usePosted)} could not move focus to the password field.";
                 }
             }
             else
             {
-                problem = await ClickPasswordAsync(controls, password, typingDelayMilliseconds, cancellationToken)
+                problem = await ClickAndTypeAsync(controls.PasswordIndex, controls.PasswordBounds, password, typingDelayMilliseconds, usePosted, cancellationToken)
                     .ConfigureAwait(false);
-            }
-
-            if (problem is not null)
-            {
-                return problem;
+                if (problem is not null)
+                {
+                    return problem;
+                }
             }
 
             var usernameIntact = string.Equals(ui.GetFieldValue(controls.UsernameIndex), username, StringComparison.Ordinal);
@@ -172,70 +191,101 @@ public sealed class PointerLoginDriver(
             }
 
             log.Warn(
-                $"Pointer login: password attempt {attempt + 1} did not land " +
+                $"Pointer login ({Delivery(usePosted)}): password attempt {attempt + 1} did not land " +
                 $"(username intact: {usernameIntact}, password characters: {passwordLength?.ToString() ?? "unreadable"})");
 
             // A focus mishap can leave the password inside the username field; restore it before retrying.
             if (!usernameIntact)
             {
-                problem = await ClickAndTypeAsync(controls.UsernameBounds, username, typingDelayMilliseconds, cancellationToken)
+                problem = await ClickAndTypeAsync(controls.UsernameIndex, controls.UsernameBounds, username, typingDelayMilliseconds, usePosted, cancellationToken)
                     .ConfigureAwait(false);
                 if (problem is not null)
                 {
                     return problem;
                 }
+
+                if (!string.Equals(ui.GetFieldValue(controls.UsernameIndex), username, StringComparison.Ordinal))
+                {
+                    return "the app did not receive the typed username.";
+                }
             }
         }
 
-        return "the password field did not receive the typed characters, so simulated keyboard input is not reaching it. " +
-               "Make sure the IBKR Desktop window is focused and running at the same privilege level as this manager.";
+        return "the password field did not receive the typed characters.";
     }
 
-    private async Task<string?> ClickPasswordAsync(
+    private async Task<bool> MoveFocusToPasswordAsync(
         UiLoginControls controls,
         string password,
         int typingDelayMilliseconds,
+        bool usePosted,
         CancellationToken cancellationToken)
     {
-        if (!_mouse.Click(controls.PasswordBounds.CenterX, controls.PasswordBounds.CenterY))
+        var moved = usePosted ? _posted.KeyPress(NativeMethods.VK_TAB) : _keyboard.SendKeyPress(NativeMethods.VK_TAB);
+        if (!moved)
         {
-            log.Warn($"Pointer login: click on the password field failed (error {_mouse.LastError})");
-            return $"Windows rejected the simulated click on the password field (mouse error {_mouse.LastError})";
+            return false;
         }
 
-        await Task.Delay(ClickDelay, cancellationToken).ConfigureAwait(false);
-        return await ClearAndTypeAsync(password, typingDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+        await Task.Delay(usePosted ? PostedDelay : ClickDelay, cancellationToken).ConfigureAwait(false);
+        return await ClearAndTypeAsync(controls.PasswordIndex, password, typingDelayMilliseconds, usePosted, cancellationToken)
+            .ConfigureAwait(false) is null;
     }
 
+    /// <summary>Clicks the field, replaces its contents and types the value.</summary>
     private async Task<string?> ClickAndTypeAsync(
+        int index,
         UiBounds bounds,
         string value,
         int typingDelayMilliseconds,
+        bool usePosted,
         CancellationToken cancellationToken)
     {
-        if (!_mouse.Click(bounds.CenterX, bounds.CenterY))
+        var clicked = usePosted
+            ? _posted.Click(bounds.CenterX, bounds.CenterY)
+            : _mouse.Click(bounds.CenterX, bounds.CenterY);
+        if (!clicked)
         {
-            log.Warn($"Pointer login: click on the login field failed (error {_mouse.LastError})");
-            return $"Windows rejected the simulated click on the login field (mouse error {_mouse.LastError})";
+            return $"Windows rejected the simulated click ({Delivery(usePosted)}).";
         }
 
-        await Task.Delay(ClickDelay, cancellationToken).ConfigureAwait(false);
-        return await ClearAndTypeAsync(value, typingDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+        await Task.Delay(usePosted ? PostedDelay : ClickDelay, cancellationToken).ConfigureAwait(false);
+        return await ClearAndTypeAsync(index, value, typingDelayMilliseconds, usePosted, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Replaces the focused field's contents with <paramref name="value"/>.</summary>
-    private async Task<string?> ClearAndTypeAsync(string value, int typingDelayMilliseconds, CancellationToken cancellationToken)
+    private async Task<string?> ClearAndTypeAsync(
+        int index,
+        string value,
+        int typingDelayMilliseconds,
+        bool usePosted,
+        CancellationToken cancellationToken)
     {
-        if (!_keyboard.SendSelectAll() || !_keyboard.SendKeyPress(NativeMethods.VK_BACK))
+        if (usePosted)
+        {
+            // Posted messages cannot carry modifiers, so clear with one Backspace per character.
+            var existing = Math.Clamp(ui.GetFieldLength(index) ?? 0, 0, 200);
+            for (var i = 0; i < existing; i++)
+            {
+                if (!_posted.KeyPress(NativeMethods.VK_BACK))
+                {
+                    return "Windows rejected the posted Backspace.";
+                }
+            }
+        }
+        else if (!_keyboard.SendSelectAll() || !_keyboard.SendKeyPress(NativeMethods.VK_BACK))
         {
             return $"Windows rejected the simulated keyboard input (SendInput error {_keyboard.LastError})";
         }
 
         foreach (var character in value)
         {
-            if (!_keyboard.SendText(character.ToString()))
+            var sent = usePosted ? _posted.Text(character) : _keyboard.SendText(character.ToString());
+            if (!sent)
             {
-                return $"Windows rejected the simulated keyboard input (SendInput error {_keyboard.LastError})";
+                return usePosted
+                    ? "Windows rejected the posted character."
+                    : $"Windows rejected the simulated keyboard input (SendInput error {_keyboard.LastError})";
             }
 
             if (typingDelayMilliseconds > 0)
@@ -247,10 +297,21 @@ public sealed class PointerLoginDriver(
         return null;
     }
 
-    private bool SubmitLogin(UiLoginControls controls) =>
-        controls.SubmitBounds.IsEmpty
-            ? _keyboard.SendKeyPress(NativeMethods.VK_RETURN)
+    private bool SubmitLogin(UiLoginControls controls, bool usePosted)
+    {
+        if (controls.SubmitBounds.IsEmpty)
+        {
+            return usePosted
+                ? _posted.KeyPress(NativeMethods.VK_RETURN)
+                : _keyboard.SendKeyPress(NativeMethods.VK_RETURN);
+        }
+
+        return usePosted
+            ? _posted.Click(controls.SubmitBounds.CenterX, controls.SubmitBounds.CenterY)
             : _mouse.Click(controls.SubmitBounds.CenterX, controls.SubmitBounds.CenterY);
+    }
+
+    private static string Delivery(bool usePosted) => usePosted ? "posted messages" : "SendInput";
 
     /// <summary>
     /// The app's own visible text, so a failure explains itself ("Please enter your username and

@@ -52,7 +52,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             uia,
             process,
             log,
-            canInject: () => true,
+            isInteractive: InteractiveSession.IsInteractive,
             inspector: uia);
         var manager = new AppManager(
             new WindowsAppLocator(Profile, new UninstallRegistry()),

@@ -37,18 +37,49 @@ public sealed class PointerLoginDriverTests
         Assert.False(result.Success);
         Assert.Empty(harness.Mouse.Clicks);
         Assert.Empty(harness.Keyboard.Events);
+        Assert.Empty(harness.Posted.Events);
     }
 
     [Fact]
-    public async Task Does_not_apply_when_the_session_cannot_deliver_input()
+    public async Task Uses_sendinput_on_an_interactive_desktop_and_never_posts()
     {
-        var harness = new Harness(LoginControls()) { CanInject = false };
+        var harness = new Harness(LoginControls());
 
         var result = await harness.Driver.LoginAsync(Request());
 
-        Assert.True(result.NotApplicable);
-        Assert.Contains("synthetic", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.ReachedTwoFactor, result.Message);
+        Assert.Empty(harness.Posted.Events);
+        Assert.Equal("alice", harness.Ui.Values[0]);
+        Assert.Equal("secret", harness.Ui.Values[1]);
+    }
+
+    [Fact]
+    public async Task Uses_posted_messages_when_the_session_has_no_input_desktop()
+    {
+        var harness = new Harness(LoginControls()) { Interactive = false };
+
+        var result = await harness.Driver.LoginAsync(Request());
+
+        Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Empty(harness.Mouse.Clicks);
+        Assert.Empty(harness.Keyboard.Events);
+        Assert.Equal("alice", harness.Ui.Values[0]);
+        Assert.Equal("secret", harness.Ui.Values[1]);
+    }
+
+    [Fact]
+    public async Task Falls_back_to_posted_messages_when_sendinput_does_not_land()
+    {
+        // The real failure mode on a service session: SendInput is discarded without an error.
+        var harness = new Harness(LoginControls());
+        harness.Ui.RealInputWorks = false;
+
+        var result = await harness.Driver.LoginAsync(Request());
+
+        Assert.True(result.ReachedTwoFactor, result.Message);
+        Assert.NotEmpty(harness.Posted.Events);
+        Assert.Equal("alice", harness.Ui.Values[0]);
+        Assert.Equal("secret", harness.Ui.Values[1]);
     }
 
     [Fact]
@@ -72,8 +103,6 @@ public sealed class PointerLoginDriverTests
             ],
             harness.Keyboard.Events);
 
-        Assert.Equal("alice", harness.Ui.Values[0]);
-        Assert.Equal("secret", harness.Ui.Values[1]);
         Assert.Equal(1, harness.Ui.WaitCalls);
         Assert.Contains("2FA", result.Message);
     }
@@ -105,18 +134,18 @@ public sealed class PointerLoginDriverTests
     }
 
     [Fact]
-    public async Task Fails_without_submitting_when_the_typed_username_does_not_reach_the_app()
+    public async Task Fails_without_submitting_when_no_strategy_reaches_the_app()
     {
-        // Reproduces the ValuePattern failure mode: the app never receives the characters.
         var harness = new Harness(LoginControls());
-        harness.Ui.AcceptsTyping = false;
+        harness.Ui.RealInputWorks = false;
+        harness.Ui.PostedInputWorks = false;
 
         var result = await harness.Driver.LoginAsync(Request());
 
         Assert.False(result.Success);
         Assert.Contains("did not receive the typed username", result.Message);
-        Assert.Single(harness.Mouse.Clicks);
-        Assert.DoesNotContain(harness.Mouse.Clicks, click => click.Y == 300);
+        Assert.Contains("sendinput", result.Message);
+        Assert.Contains("posted", result.Message);
         Assert.Equal(0, harness.Ui.WaitCalls);
     }
 
@@ -130,9 +159,6 @@ public sealed class PointerLoginDriverTests
 
         Assert.False(result.Success);
         Assert.Contains("password field did not receive", result.Message);
-
-        // The username must be restored after the failed attempt.
-        Assert.Equal("alice", harness.Ui.Values[0]);
         Assert.Equal(0, harness.Ui.WaitCalls);
     }
 
@@ -141,24 +167,26 @@ public sealed class PointerLoginDriverTests
     {
         var harness = new Harness(LoginControls());
         harness.Keyboard.RejectText = true;
+        harness.Posted.Reject = true;
 
         var result = await harness.Driver.LoginAsync(Request());
 
         Assert.False(result.Success);
-        Assert.Contains("SendInput", result.Message);
+        Assert.Contains("could not type the credentials", result.Message);
         Assert.Equal(0, harness.Ui.WaitCalls);
     }
 
     [Fact]
     public async Task Fails_when_the_login_button_cannot_be_clicked()
     {
+        // Fields land normally, but the click on the button is refused.
         var harness = new Harness(LoginControls());
-        harness.Mouse.Reject = true;
+        harness.Mouse.RejectY = 300;
 
         var result = await harness.Driver.LoginAsync(Request());
 
         Assert.False(result.Success);
-        Assert.Contains("click", result.Message);
+        Assert.Contains("login button", result.Message);
     }
 
     [Fact]
@@ -171,6 +199,17 @@ public sealed class PointerLoginDriverTests
         Assert.True(result.ReachedTwoFactor, result.Message);
         Assert.Single(harness.Mouse.Clicks);
         Assert.Contains("key:13", harness.Keyboard.Events);
+    }
+
+    [Fact]
+    public async Task Presses_enter_with_posted_messages_when_the_button_has_no_rectangle()
+    {
+        var harness = new Harness(LoginControls(submit: new UiBounds(0, 0, 0, 0))) { Interactive = false };
+
+        var result = await harness.Driver.LoginAsync(Request());
+
+        Assert.True(result.ReachedTwoFactor, result.Message);
+        Assert.Contains("key:13", harness.Posted.Events);
     }
 
     [Fact]
@@ -222,13 +261,15 @@ public sealed class PointerLoginDriverTests
             Ui = new FakeUi { Controls = controls };
             Keyboard = new RecordingKeyboard { Ui = Ui };
             Mouse = new RecordingMouse { Ui = Ui };
+            Posted = new RecordingPostedInput { Ui = Ui };
             Driver = new PointerLoginDriver(
                 Ui,
                 new StubProcess(),
                 NullAppLog.Instance,
                 Keyboard,
                 Mouse,
-                () => CanInject,
+                Posted,
+                () => Interactive,
                 Inspector);
         }
 
@@ -238,9 +279,11 @@ public sealed class PointerLoginDriverTests
 
         public RecordingMouse Mouse { get; }
 
+        public RecordingPostedInput Posted { get; }
+
         public FakeInspector Inspector { get; } = new();
 
-        public bool CanInject { get; init; } = true;
+        public bool Interactive { get; init; } = true;
 
         public PointerLoginDriver Driver { get; }
     }
@@ -263,8 +306,11 @@ public sealed class PointerLoginDriverTests
 
         public bool FormDisappears { get; set; } = true;
 
-        /// <summary>False simulates a toolkit whose fields never see the synthetic keystrokes.</summary>
-        public bool AcceptsTyping { get; set; } = true;
+        /// <summary>False simulates a session where Windows discards SendInput.</summary>
+        public bool RealInputWorks { get; set; } = true;
+
+        /// <summary>False simulates an app that ignores posted messages.</summary>
+        public bool PostedInputWorks { get; set; } = true;
 
         public bool AcceptsPasswordTyping { get; set; } = true;
 
@@ -294,6 +340,50 @@ public sealed class PointerLoginDriverTests
             WaitCalls++;
             return FormDisappears;
         }
+
+        /// <summary>Which field the given screen position would focus, or -1.</summary>
+        public int FieldAt(int y)
+        {
+            var controls = Controls;
+            if (controls is null)
+            {
+                return -1;
+            }
+
+            foreach (var (index, bounds) in new[]
+                     {
+                         (controls.UsernameIndex, controls.UsernameBounds),
+                         (controls.PasswordIndex, controls.PasswordBounds),
+                     })
+            {
+                if (!bounds.IsEmpty && Math.Abs(bounds.CenterY - y) <= Math.Max(1, bounds.Height / 2))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        public void Type(string text)
+        {
+            if (Focus == 1 && !AcceptsPasswordTyping)
+            {
+                return;
+            }
+
+            Values[Focus] = (Values.GetValueOrDefault(Focus) ?? string.Empty) + text;
+        }
+
+        public void Backspace() => Values[Focus] = string.Empty;
+
+        public void Tab()
+        {
+            if (TabMovesFocus)
+            {
+                Focus = Focus == 0 ? 1 : 0;
+            }
+        }
     }
 
     private sealed class RecordingKeyboard : IKeyboardInput
@@ -314,41 +404,29 @@ public sealed class PointerLoginDriverTests
             }
 
             Events.Add("text:" + text);
-            var ui = Ui;
-            if (ui is null || !ui.AcceptsTyping)
+            if (Ui is { RealInputWorks: true })
             {
-                return true;
+                Ui.Type(text);
             }
 
-            if (ui.Focus == 1 && !ui.AcceptsPasswordTyping)
-            {
-                return true;
-            }
-
-            ui.Values[ui.Focus] = (ui.Values.GetValueOrDefault(ui.Focus) ?? string.Empty) + text;
             return true;
         }
 
         public bool SendKeyPress(ushort key)
         {
             Events.Add("key:" + key);
-            var ui = Ui;
-            if (ui is null)
+            if (Ui is not { RealInputWorks: true })
             {
                 return true;
             }
 
             switch (key)
             {
-                case 0x08: // Backspace
-                    ui.Values[ui.Focus] = string.Empty;
+                case 0x08:
+                    Ui.Backspace();
                     break;
-                case 0x09: // Tab
-                    if (ui.TabMovesFocus)
-                    {
-                        ui.Focus = ui.Focus == 0 ? 1 : 0;
-                    }
-
+                case 0x09:
+                    Ui.Tab();
                     break;
             }
 
@@ -368,7 +446,41 @@ public sealed class PointerLoginDriverTests
 
         public bool Reject { get; set; }
 
-        public int LastError => Reject ? 5 : 0;
+        /// <summary>Rejects only clicks at this screen Y (to fail the submit click alone).</summary>
+        public int? RejectY { get; set; }
+
+        public int LastError => Reject || RejectY is not null ? 5 : 0;
+
+        public FakeUi? Ui { get; set; }
+
+        public bool Click(int x, int y)
+        {
+            if (Reject || (RejectY is { } rejectY && Math.Abs(rejectY - y) <= 10))
+            {
+                return false;
+            }
+
+            Clicks.Add((x, y));
+            if (Ui is not { RealInputWorks: true })
+            {
+                return true;
+            }
+
+            var field = Ui.FieldAt(y);
+            if (field >= 0)
+            {
+                Ui.Focus = field;
+            }
+
+            return true;
+        }
+    }
+
+    private sealed class RecordingPostedInput : IPostedInput
+    {
+        public List<string> Events { get; } = [];
+
+        public bool Reject { get; set; }
 
         public FakeUi? Ui { get; set; }
 
@@ -379,25 +491,58 @@ public sealed class PointerLoginDriverTests
                 return false;
             }
 
-            Clicks.Add((x, y));
-            var controls = Ui?.Controls;
-            if (Ui is null || controls is null)
+            Events.Add($"click:{x},{y}");
+            if (Ui is not { PostedInputWorks: true })
             {
                 return true;
             }
 
-            // A click focuses the field under the pointer, exactly like the real form.
-            foreach (var (index, bounds) in new[]
-                     {
-                         (controls.UsernameIndex, controls.UsernameBounds),
-                         (controls.PasswordIndex, controls.PasswordBounds),
-                     })
+            var field = Ui.FieldAt(y);
+            if (field >= 0)
             {
-                if (!bounds.IsEmpty && Math.Abs(bounds.CenterY - y) <= Math.Max(1, bounds.Height / 2))
-                {
-                    Ui.Focus = index;
-                    return true;
-                }
+                Ui.Focus = field;
+            }
+
+            return true;
+        }
+
+        public bool Text(char character)
+        {
+            if (Reject)
+            {
+                return false;
+            }
+
+            Events.Add("char:" + character);
+            if (Ui is { PostedInputWorks: true })
+            {
+                Ui.Type(character.ToString());
+            }
+
+            return true;
+        }
+
+        public bool KeyPress(ushort virtualKey)
+        {
+            if (Reject)
+            {
+                return false;
+            }
+
+            Events.Add("key:" + virtualKey);
+            if (Ui is not { PostedInputWorks: true })
+            {
+                return true;
+            }
+
+            switch (virtualKey)
+            {
+                case 0x08:
+                    Ui.Backspace();
+                    break;
+                case 0x09:
+                    Ui.Tab();
+                    break;
             }
 
             return true;
@@ -414,7 +559,7 @@ public sealed class PointerLoginDriverTests
 
         public string? MainWindowTitle => "IBKR Desktop";
 
-        public IntPtr? MainWindowHandle => null;
+        public IntPtr? MainWindowHandle => (IntPtr)1234;
 
         public bool HasVisibleWindow => true;
 
