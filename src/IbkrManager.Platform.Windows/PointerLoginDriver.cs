@@ -30,7 +30,8 @@ public sealed class PointerLoginDriver(
     IMouseInput? mouse = null,
     IPostedInput? postedInput = null,
     Func<bool>? isInteractive = null,
-    IWindowInspector? inspector = null) : ILoginDriver
+    IWindowInspector? inspector = null,
+    Func<Task>? beforeSubmit = null) : ILoginDriver
 {
     /// <summary>Time for the window manager to settle after the window is raised.</summary>
     private static readonly TimeSpan FocusDelay = TimeSpan.FromMilliseconds(250);
@@ -111,6 +112,12 @@ public sealed class PointerLoginDriver(
         log.Info($"Pointer login: credentials typed with the {used} strategy");
 
         await Task.Delay(SubmitDelay, cancellationToken).ConfigureAwait(false);
+
+        // Observability hook: lets the caller snapshot the filled form just before submitting.
+        if (beforeSubmit is not null)
+        {
+            await beforeSubmit().ConfigureAwait(false);
+        }
 
         var usePosted = used == "posted";
         if (!SubmitLogin(controls, usePosted))

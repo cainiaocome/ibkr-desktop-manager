@@ -50,7 +50,9 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
         var outputDirectory = OutputDirectory();
         KillStaleApp();
 
+        var report = new Dictionary<string, object?>();
         var log = new RecordingLog();
+        UiLoginControls? controls = null;
         var process = new Win32ProcessController(Profile, log);
         var uia = new UiaSession(process, Profile, log);
         var driver = new PointerLoginDriver(
@@ -59,7 +61,20 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             log,
             postedInput: new PostedWindowInput(process),
             isInteractive: InteractiveSession.IsInteractive,
-            inspector: uia);
+            inspector: uia,
+            beforeSubmit: async () =>
+            {
+                // Proof that both fields held the typed values at the moment of submission.
+                report["submittedUsername"] = uia.GetFieldValue(controls!.UsernameIndex);
+                report["submittedPasswordLength"] = uia.GetFieldLength(controls.PasswordIndex);
+                var path = Path.Combine(outputDirectory, "e2e-filled-screen.png");
+                if (Capture.TryCaptureScreen(path))
+                {
+                    report["filledScreenshot"] = path;
+                }
+
+                await Task.CompletedTask;
+            });
         var manager = new AppManager(
             new WindowsAppLocator(Profile, new UninstallRegistry()),
             process,
@@ -70,12 +85,9 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             log,
             inspector: uia);
 
-        var report = new Dictionary<string, object?>
-        {
-            ["username"] = username,
-            ["passwordLength"] = password.Length,
-            ["interactive"] = InteractiveSession.IsInteractive(),
-        };
+        report["username"] = username;
+        report["passwordLength"] = password.Length;
+        report["interactive"] = InteractiveSession.IsInteractive();
 
         try
         {
@@ -83,7 +95,7 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
             await manager.StartAsync();
             report["installation"] = manager.State.Installation?.ExecutablePath;
 
-            var controls = await WaitForLoginControlsAsync(manager, uia, TimeSpan.FromMinutes(3));
+            controls = await WaitForLoginControlsAsync(manager, uia, TimeSpan.FromMinutes(3));
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
             Assert.True(
                 controls is not null,
