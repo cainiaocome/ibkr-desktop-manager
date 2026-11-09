@@ -14,6 +14,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private readonly ILoginDriver _loginDriver;
     private readonly IClock _clock;
     private readonly IAppLog _log;
+    private readonly IWindowInspector _inspector;
     private readonly TimeSpan _pollInterval;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -35,6 +36,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         AppProfile profile,
         IClock clock,
         IAppLog log,
+        IWindowInspector? inspector = null,
         TimeSpan? pollInterval = null)
     {
         _locator = locator;
@@ -44,6 +46,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         Profile = profile;
         _clock = clock;
         _log = log;
+        _inspector = inspector ?? NullWindowInspector.Instance;
         _pollInterval = pollInterval ?? DefaultPollInterval;
     }
 
@@ -348,7 +351,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             return _failed ? AppStatus.Failed : AppStatus.Stopped;
         }
 
-        var kind = Profile.Classify(_process.MainWindowTitle);
+        var kind = ClassifyWindow();
         return kind switch
         {
             WindowKind.LoggedIn => AppStatus.LoggedIn,
@@ -356,6 +359,25 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             WindowKind.Login => _twoFactorSince is null ? AppStatus.AwaitingLogin : AppStatus.AwaitingTwoFactor,
             _ => InLaunchGracePeriod() ? AppStatus.Launching : _twoFactorSince is null ? AppStatus.AwaitingLogin : AppStatus.AwaitingTwoFactor,
         };
+    }
+
+    /// <summary>
+    /// Accessibility first, title second: IBKR Desktop's window title never changes between the
+    /// login screen and the logged-in app.
+    /// </summary>
+    private WindowKind ClassifyWindow()
+    {
+        UiObservation? observation = null;
+        try
+        {
+            observation = _inspector.Observe();
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"UI Automation inspection failed: {ex.Message}");
+        }
+
+        return UiClassifier.Classify(Profile, _process.MainWindowTitle, observation);
     }
 
     private bool InLaunchGracePeriod() =>

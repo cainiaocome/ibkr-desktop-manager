@@ -11,6 +11,9 @@ public interface IProcessController
 
     string? MainWindowTitle { get; }
 
+    /// <summary>Native handle of the main window, used to attach UI Automation.</summary>
+    IntPtr? MainWindowHandle { get; }
+
     bool HasVisibleWindow { get; }
 
     Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default);

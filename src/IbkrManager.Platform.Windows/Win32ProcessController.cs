@@ -48,6 +48,10 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
 
     public bool HasVisibleWindow => Read(static process => process.MainWindowHandle != IntPtr.Zero, false);
 
+    public IntPtr? MainWindowHandle => Read(
+        static process => process.MainWindowHandle is { } handle && handle != IntPtr.Zero ? (IntPtr?)handle : null,
+        null);
+
     public Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

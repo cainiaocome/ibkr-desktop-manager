@@ -32,6 +32,16 @@ public sealed record AppProfile
 
     public IReadOnlyList<string> LoggedInWindowTitlePatterns { get; init; } = [];
 
+    /// <summary>Accessibility (UI Automation) ids whose presence means "login form is showing".</summary>
+    public IReadOnlyList<string> LoginAutomationIdPatterns { get; init; } = [];
+
+    /// <summary>Button labels on the login form (e.g. "Log In").</summary>
+    public IReadOnlyList<string> LoginButtonNames { get; init; } = [];
+
+    public IReadOnlyList<string> TwoFactorAutomationIdPatterns { get; init; } = [];
+
+    public IReadOnlyList<string> LoggedInAutomationIdPatterns { get; init; } = [];
+
     public TimeSpan LaunchTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
     public TimeSpan LoginWindowTimeout { get; init; } = TimeSpan.FromMinutes(2);
@@ -112,6 +122,10 @@ public sealed record AppProfile
                 LoginWindowTitlePatterns = dto.LoginWindowTitlePatterns ?? [],
                 TwoFactorWindowTitlePatterns = dto.TwoFactorWindowTitlePatterns ?? [],
                 LoggedInWindowTitlePatterns = dto.LoggedInWindowTitlePatterns ?? [],
+                LoginAutomationIdPatterns = dto.LoginAutomationIdPatterns ?? [],
+                LoginButtonNames = dto.LoginButtonNames ?? [],
+                TwoFactorAutomationIdPatterns = dto.TwoFactorAutomationIdPatterns ?? [],
+                LoggedInAutomationIdPatterns = dto.LoggedInAutomationIdPatterns ?? [],
                 LaunchTimeout = TimeSpan.FromSeconds(dto.LaunchTimeoutSeconds ?? 120),
                 LoginWindowTimeout = TimeSpan.FromSeconds(dto.LoginWindowTimeoutSeconds ?? 120),
                 GracefulShutdownTimeout = TimeSpan.FromSeconds(dto.GracefulShutdownTimeoutSeconds ?? 15),
@@ -178,6 +192,14 @@ public sealed record AppProfile
         public string[]? TwoFactorWindowTitlePatterns { get; init; }
 
         public string[]? LoggedInWindowTitlePatterns { get; init; }
+
+        public string[]? LoginAutomationIdPatterns { get; init; }
+
+        public string[]? LoginButtonNames { get; init; }
+
+        public string[]? TwoFactorAutomationIdPatterns { get; init; }
+
+        public string[]? LoggedInAutomationIdPatterns { get; init; }
 
         public int? LaunchTimeoutSeconds { get; init; }
 

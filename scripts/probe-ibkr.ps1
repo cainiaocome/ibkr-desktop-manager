@@ -595,6 +595,16 @@ $match = [ordered]@{
     TitleMatchesPattern = $false
     TitleCannotDistinguishLogin = $false
     ContentSuggestsLogin = [bool]($summary['Hints'] -and $summary['Hints'].MentionsUsername -and $summary['Hints'].MentionsPassword)
+    AutomationIds = @()
+    AutomationIdMatchesProfile = $false
+}
+$uiaIds = @($summary['UiaSetValue'] | ForEach-Object { $_.AutomationId }) + @()
+$allIds = @($uiaElements | ForEach-Object { $_.AutomationId })
+$match.AutomationIds = @($allIds | Where-Object { $_ } | Select-Object -Unique)
+foreach ($pattern in $profile.loginAutomationIdPatterns) {
+    foreach ($id in $match.AutomationIds) {
+        if ($id -like "*$pattern*") { $match.AutomationIdMatchesProfile = $true; break }
+    }
 }
 if ($mainWindow) {
     foreach ($pattern in $profile.LoginTitlePatterns) {
@@ -634,6 +644,7 @@ $markdown += ('| Main window title | `' + $titleText + '` |')
 $markdown += ('| Window class | `' + $classText + '` |')
 $markdown += ('| Title matches a login pattern | ' + $match.TitleMatchesPattern + ' |')
 $markdown += ('| Content suggests a login form | ' + $match.ContentSuggestsLogin + ' |')
+$markdown += ('| Automation id matches loginAutomationIdPatterns | ' + $match.AutomationIdMatchesProfile + ' |')
 $markdown += ('| UI Automation elements | ' + $summary.UiaElementCount + ' |')
 $markdown += ('| UIA editable fields | ' + $uiaCount + ' |')
 $markdown += ''
@@ -654,8 +665,8 @@ if (-not $mainWindow) {
     exit 2
 }
 
-if (-not $match.TitleMatchesPattern -and -not $match.ContentSuggestsLogin) {
-    Write-Error ("Neither the title '{0}' nor the UI Automation content identifies a login screen. " +
+if (-not $match.AutomationIdMatchesProfile -and -not $match.ContentSuggestsLogin) {
+    Write-Error ("Neither the profile's loginAutomationIdPatterns nor the UIA content identifies a login screen. " +
         "Update app-profile.json / the inspector so the manager can tell login from logged-in." -f $mainWindow.Title)
     exit 3
 }

@@ -8,8 +8,9 @@ namespace IbkrManager.IntegrationTests;
 /// 208 MB download and needs a JVM), it is enabled by the "IBKR Desktop probe" workflow with
 /// IBKR_REAL_APP=1 after the installer has run.
 ///
-/// It checks the two assumptions the manager cannot fake: the production locator finds the real
-/// install, and the shipped profile classifies the real login window as a login window.
+/// It checks the assumptions the manager cannot fake: the production locator finds the real
+/// install, and UI Automation identifies the Qt/QML login screen even though the window title is
+/// the constant "IBKR Desktop".
 /// </summary>
 [Collection("windows-ui")]
 [Trait("Category", "RealIbkDesktop")]
@@ -39,7 +40,7 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Launch_reaches_a_login_window_that_the_profile_recognises()
+    public async Task Launch_is_classified_as_the_login_screen_through_ui_automation()
     {
         if (!OperatingSystem.IsWindows() || !Enabled)
         {
@@ -47,33 +48,45 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
         }
 
         var log = new RecordingLog();
-        var locator = new WindowsAppLocator(Profile, new UninstallRegistry());
         var process = new Win32ProcessController(Profile, log);
-        var resolver = new CredentialResolver([new SessionCredentialStore()]);
+        var uia = new UiaSession(process, Profile, log);
         var manager = new AppManager(
-            locator,
+            new WindowsAppLocator(Profile, new UninstallRegistry()),
             process,
-            resolver,
+            new CredentialResolver([new SessionCredentialStore()]),
             new ManualLoginDriver(),
             Profile,
             SystemClock.Instance,
-            log);
+            log,
+            inspector: uia);
 
         try
         {
             await manager.InitializeAsync();
-            Assert.NotNull(manager.State.Installation);
-
             var state = await manager.StartAsync();
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
-            output.WriteLine($"title: '{state.WindowTitle}'  status: {state.Status}");
 
-            Assert.False(string.IsNullOrWhiteSpace(state.WindowTitle), "the app should expose a main window title");
-            var kind = Profile.Classify(state.WindowTitle);
+            var observation = uia.Observe();
+            output.WriteLine($"title: '{state.WindowTitle}' status: {state.Status}");
+            if (observation is not null)
+            {
+                output.WriteLine($"uia ({observation.Elements.Count} elements): {observation.Describe(20)}");
+            }
+
+            Assert.NotNull(observation);
+            Assert.False(observation!.IsEmpty, "UI Automation should expose the login form");
             Assert.True(
-                kind == WindowKind.Login,
-                $"the real window title '{state.WindowTitle}' must classify as Login, but was {kind}. " +
-                "Update app-profile.json loginWindowTitlePatterns (and keep the 2FA patterns ahead of them).");
+                observation.HasAutomationId(Profile.LoginAutomationIdPatterns),
+                $"no element matched loginAutomationIdPatterns [{string.Join(", ", Profile.LoginAutomationIdPatterns)}]; " +
+                $"observed: {observation.Describe(20)}");
+
+            // The state machine must use the content signal, not the constant window title.
+            Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+
+            var controls = uia.FindLoginControls();
+            Assert.NotNull(controls);
+            output.WriteLine($"login controls: {controls}");
+            Assert.True(controls!.CanSubmit, "the Log In button should be invokable");
         }
         finally
         {

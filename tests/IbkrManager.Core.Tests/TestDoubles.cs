@@ -24,6 +24,8 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
 
     public string? MainWindowTitle { get; set; }
 
+    public IntPtr? MainWindowHandle { get; set; }
+
     public bool HasVisibleWindow { get; set; }
 
     public int StartCount { get; private set; }
@@ -118,6 +120,19 @@ internal sealed class FakeCredentialProvider(
     public string? Read(CredentialKind kind) => kind == CredentialKind.Username ? username : password;
 
     string ICredentialProvider.HintFor(CredentialKind kind) => $"{displayName} {kind} is not set";
+}
+
+internal sealed class FakeInspector : IWindowInspector
+{
+    public UiObservation? Observation { get; set; }
+
+    public int Calls { get; private set; }
+
+    public UiObservation? Observe()
+    {
+        Calls++;
+        return Observation;
+    }
 }
 
 internal sealed class RecordingLog : IAppLog

@@ -39,9 +39,12 @@ public sealed class WindowsPlatform : IPlatformRuntime
         ], _redactor);
 
         _process = new Win32ProcessController(Profile, Log);
+        var uia = new UiaSession(_process, Profile, Log);
         var driver = new SelectingLoginDriver(
             () => SettingsStore.Load().LoginDriver,
-            new SendInputLoginDriver(_process, SystemClock.Instance, Log),
+            new LoginDriverChain(
+                new UiaLoginDriver(uia, Log),
+                new SendInputLoginDriver(_process, SystemClock.Instance, Log)),
             new ManualLoginDriver());
 
         var locator = new OverridingAppLocator(
@@ -49,7 +52,15 @@ public sealed class WindowsPlatform : IPlatformRuntime
             () => SettingsStore.Load().ExecutablePathOverride,
             Log);
 
-        Manager = new AppManager(locator, _process, resolver, driver, Profile, SystemClock.Instance, Log);
+        Manager = new AppManager(
+            locator,
+            _process,
+            resolver,
+            driver,
+            Profile,
+            SystemClock.Instance,
+            Log,
+            inspector: uia);
     }
 
     public IAppManager Manager { get; }

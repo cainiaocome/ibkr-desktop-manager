@@ -166,6 +166,25 @@ public sealed class AppManagerTests
     }
 
     [Fact]
+    public async Task Inspector_content_overrides_the_constant_window_title()
+    {
+        var harness = new Harness();
+        harness.Process.IsRunning = true;
+        harness.Process.HasVisibleWindow = true;
+        // The real app always reports this title, including on the login screen.
+        harness.Process.MainWindowTitle = "IBKR Desktop";
+        harness.Inspector.Observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Window", "IBKR Desktop", "QApplication.launcherLoginWindow", false),
+            new UiElementInfo("Button", "Log In", "QApplication.launcherLoginWindow.Button", false),
+        ]);
+
+        var state = await harness.Manager.TickAsync();
+
+        Assert.Equal(AppStatus.AwaitingLogin, state.Status);
+    }
+
+    [Fact]
     public async Task Tick_detects_a_logged_in_window()
     {
         var harness = new Harness();
@@ -238,7 +257,8 @@ public sealed class AppManagerTests
                 driver ?? Driver,
                 TestProfile.Fast,
                 Clock,
-                Log);
+                Log,
+                inspector: Inspector);
         }
 
         public AppInstallation? Installation { get; }
@@ -252,6 +272,8 @@ public sealed class AppManagerTests
         public CredentialResolver Resolver { get; }
 
         public RecordingLog Log { get; }
+
+        public FakeInspector Inspector { get; } = new();
 
         public AppManager Manager { get; }
     }

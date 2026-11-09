@@ -208,6 +208,8 @@ public sealed class SendInputLoginDriverTests
 
         public string? MainWindowTitle { get; set; }
 
+        public IntPtr? MainWindowHandle => null;
+
         public bool HasVisibleWindow { get; set; }
 
         public bool Focused { get; private set; }

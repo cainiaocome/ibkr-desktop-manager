@@ -17,11 +17,14 @@ public sealed record LoginRequest(Secret Username, Secret Password, AppProfile P
 /// Outcome of one injection attempt. <see cref="ReachedTwoFactor"/> means the credentials were
 /// accepted far enough for IBKR to ask for a security code — the manager stops there by design.
 /// </summary>
-public sealed record LoginResult(bool Success, string Message, bool ReachedTwoFactor = false)
+public sealed record LoginResult(bool Success, string Message, bool ReachedTwoFactor = false, bool NotApplicable = false)
 {
     public static LoginResult Failed(string message) => new(false, message);
 
     public static LoginResult AwaitingTwoFactor(string message) => new(true, message, ReachedTwoFactor: true);
 
     public static LoginResult Submitted(string message) => new(true, message);
+
+    /// <summary>This driver cannot work here; the next driver in the chain should try.</summary>
+    public static LoginResult DoesNotApply(string message) => new(false, message, NotApplicable: true);
 }
