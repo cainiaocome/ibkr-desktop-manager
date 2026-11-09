@@ -196,6 +196,7 @@ public static class ProbeNative
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -208,6 +209,30 @@ public static class ProbeNative
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+
+    public static List<ProbeWindow> EnumerateChildren(IntPtr parent)
+    {
+        var result = new List<ProbeWindow>();
+        EnumChildWindows(parent, (hWnd, lParam) =>
+        {
+            var title = new StringBuilder(1024);
+            GetWindowText(hWnd, title, title.Capacity);
+            var cls = new StringBuilder(256);
+            GetClassName(hWnd, cls, cls.Capacity);
+            RECT rect;
+            GetWindowRect(hWnd, out rect);
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            result.Add(new ProbeWindow
+            {
+                Handle = hWnd, Title = title.ToString(), ClassName = cls.ToString(),
+                ProcessId = (int)pid, Visible = IsWindowVisible(hWnd),
+                X = rect.Left, Y = rect.Top, Width = rect.Right - rect.Left, Height = rect.Bottom - rect.Top
+            });
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
 
     public static List<ProbeWindow> Enumerate(int[] processIds)
     {
@@ -283,7 +308,7 @@ function Save-WindowScreenshot([IntPtr]$Handle, [string]$Path) {
 }
 
 function Get-UiaTree {
-    param([IntPtr]$Handle, [int]$MaxDepth = 8)
+    param([IntPtr]$Handle, [int]$MaxDepth = 8, [string]$PathPrefix = 'root')
 
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
@@ -292,7 +317,6 @@ function Get-UiaTree {
     if (-not $root) { return @() }
 
     $nodes = New-Object System.Collections.ArrayList
-    $script:uiaMap = @{}
 
     function Walk($element, [int]$depth, [string]$path) {
         if ($depth -gt $MaxDepth) { return }
@@ -315,8 +339,9 @@ function Get-UiaTree {
             } catch { }
         }
 
+        $fullPath = "$PathPrefix$path"
         $node = [pscustomobject]@{
-            Path          = $path
+            Path          = $fullPath
             Depth         = $depth
             Name          = $current.Name
             AutomationId  = $current.AutomationId
@@ -339,7 +364,7 @@ function Get-UiaTree {
         }
 
         [void]$nodes.Add($node)
-        $script:uiaMap[$path] = $element
+        $script:uiaMap[$fullPath] = $element
 
         $children = $element.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
         for ($i = 0; $i -lt $children.Count; $i++) {
@@ -403,7 +428,7 @@ $process = Start-Process -FilePath $discovery.Executable -WorkingDirectory $work
 Write-Host "Started ntws.exe (pid $($process.Id)) from $workDir"
 
 $deadline = (Get-Date).AddSeconds($LaunchTimeoutSeconds)
-$loginWindow = $null
+$mainWindow = $null
 $windows = @()
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
@@ -413,23 +438,27 @@ while ((Get-Date) -lt $deadline) {
 
     $tree = Get-ProcessTree -RootId $process.Id
     $windows = @([ProbeNative]::Enumerate([int[]]$tree.Ids))
-    $visible = $windows | Where-Object { $_.Visible -and $_.Title } | Sort-Object { $_.Width * $_.Height } -Descending
+    $candidates = @($windows | Where-Object { $_.Visible -and $_.Title -and $_.Width -gt 200 } |
+        Sort-Object { $_.Width * $_.Height } -Descending)
 
-    foreach ($window in $visible) {
-        if ($window.Title -match 'Login|Log In|Sign In|Logon') {
-            $loginWindow = $window
-            break
-        }
+    if ($candidates.Count -gt 0) {
+        $mainWindow = $candidates[0]
+        break
     }
 
-    if ($loginWindow) { break }
-    Write-Host ("  waiting... {0} window(s), titles: {1}" -f $windows.Count, (($visible | ForEach-Object { $_.Title }) -join ' | '))
+    Write-Host ("  waiting... {0} window(s)" -f $windows.Count)
 }
 
 $tree = Get-ProcessTree -RootId $process.Id
 $summary.Processes = @($tree.Processes | ForEach-Object {
     [pscustomobject]@{ ProcessId = $_.ProcessId; Name = $_.Name; ExecutablePath = $_.ExecutablePath }
 })
+
+$children = @()
+if ($mainWindow) {
+    $children = @([ProbeNative]::EnumerateChildren($mainWindow.Handle))
+}
+
 $summary.Windows = @($windows | ForEach-Object {
     [pscustomobject]@{
         Handle = ('0x{0:X}' -f $_.Handle.ToInt64()); Title = $_.Title; ClassName = $_.ClassName
@@ -437,88 +466,134 @@ $summary.Windows = @($windows | ForEach-Object {
         Size = "$($_.Width)x$($_.Height)"
     }
 })
+$summary.ChildWindows = @($children | ForEach-Object {
+    [pscustomobject]@{
+        Handle = ('0x{0:X}' -f $_.Handle.ToInt64()); Title = $_.Title; ClassName = $_.ClassName
+        ProcessId = $_.ProcessId; Visible = $_.Visible
+        Size = "$($_.Width)x$($_.Height)"
+    }
+})
 
-if (-not $loginWindow) {
-    Write-Warning 'No login window appeared before the timeout'
+$uiaElements = @()
+if (-not $mainWindow) {
+    Write-Warning 'No main window appeared before the timeout'
 } else {
-    Write-Section "Login window: '$($loginWindow.Title)' (class $($loginWindow.ClassName))"
+    Write-Section ("Main window: '{0}' (class {1}, {2}x{3})" -f $mainWindow.Title, $mainWindow.ClassName, $mainWindow.Width, $mainWindow.Height)
     $summary.LoginWindow = [pscustomobject]@{
-        Title = $loginWindow.Title; ClassName = $loginWindow.ClassName
-        Handle = ('0x{0:X}' -f $loginWindow.Handle.ToInt64()); ProcessId = $loginWindow.ProcessId
-        Size = "$($loginWindow.Width)x$($loginWindow.Height)"
+        Title = $mainWindow.Title; ClassName = $mainWindow.ClassName
+        Handle = ('0x{0:X}' -f $mainWindow.Handle.ToInt64()); ProcessId = $mainWindow.ProcessId
+        Size = "$($mainWindow.Width)x$($mainWindow.Height)"
     }
 
-    [void][ProbeNative]::ShowWindow($loginWindow.Handle, 9)
-    [void][ProbeNative]::SetForegroundWindow($loginWindow.Handle)
-    $null = Save-WindowScreenshot -Handle $loginWindow.Handle -Path (Join-Path $OutputDirectory 'screenshot.png')
+    Write-Host 'Child windows:'
+    $children | Format-Table ProcessId, Visible, ClassName, Title, Size -AutoSize | Out-String -Width 220 | Write-Host
 
-    Write-Section 'UI Automation tree'
-    try {
-        $uia = @(Get-UiaTree -Handle $loginWindow.Handle)
-        $uia | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutputDirectory 'uia.json')
-        $uia | Format-Table Depth, ControlType, Name, AutomationId, ClassName, Patterns, HasKeyboardFocus -AutoSize |
-            Out-String -Width 220 | Write-Host
+    [void][ProbeNative]::ShowWindow($mainWindow.Handle, 9)
+    [void][ProbeNative]::SetForegroundWindow($mainWindow.Handle)
+    $null = Save-WindowScreenshot -Handle $mainWindow.Handle -Path (Join-Path $OutputDirectory 'screenshot.png')
 
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($focused) {
-            Write-Host ("Focused element: {0} '{1}' (automation id '{2}')" -f $focused.Current.ControlType.ProgrammaticName, $focused.Current.Name, $focused.Current.AutomationId)
-        }
-
-        $edits = $uia | Where-Object { $_.ControlType -eq 'ControlType.Edit' }
-        Write-Host ("Editable fields: {0}" -f (($edits | ForEach-Object { "$($_.Name)/$($_.AutomationId)" }) -join ', '))
-
-        # Can a UIA ValuePattern set the fields? That would allow a far more robust driver than SendInput.
-        $uiaProbe = @()
-        $index = 0
-        foreach ($edit in $edits) {
-            $index++
-            $element = $script:uiaMap[$edit.Path]
-            if (-not $element) { continue }
-
-            $result = [ordered]@{
-                Index = $index; Name = $edit.Name; AutomationId = $edit.AutomationId
-                SetValue = $false; ReadBack = $null; Error = $null
+    Write-Section 'UI Automation'
+    $handlesToProbe = @($mainWindow.Handle) + @($children | Where-Object { $_.Width -gt 100 -and $_.Height -gt 100 } | ForEach-Object { $_.Handle })
+    $index = 0
+    $script:uiaMap = @{}
+    foreach ($handle in $handlesToProbe) {
+        $index++
+        try {
+            $uia = @(Get-UiaTree -Handle $handle -MaxDepth 10 -PathPrefix ("h{0}:" -f $index))
+            Write-Host ("handle 0x{0:X}: {1} UIA element(s)" -f $handle.ToInt64(), $uia.Count)
+            if ($uia.Count -gt 0) {
+                $uiaElements += $uia
+                $uia | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutputDirectory ("uia-{0}.json" -f $index))
+                if ($index -eq 1) {
+                    $uia | Format-Table -Property Depth, ControlType, Name, AutomationId, ClassName, Patterns, HasKeyboardFocus -AutoSize |
+                        Out-String -Width 240 | Write-Host
+                }
             }
-
-            try {
-                $valuePattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                $valuePattern.SetValue("probe-$index")
-                $result.SetValue = $true
-                $result.ReadBack = $valuePattern.Current.Value
-            } catch {
-                $result.Error = $_.Exception.Message
-            }
-
-            $uiaProbe += [pscustomobject]$result
+        } catch {
+            Write-Warning ("UIA failed for 0x{0:X}: {1}" -f $handle.ToInt64(), $_)
         }
-
-        if ($uiaProbe.Count -gt 0) {
-            Write-Host 'UIA SetValue probe:'
-            $uiaProbe | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-            $summary['UiaSetValue'] = $uiaProbe
-        } else {
-            $summary['UiaSetValue'] = @()
-        }
-    } catch {
-        Write-Warning "UIA inspection failed: $_"
-        $summary['UiaError'] = "$_"
     }
+
+    if ($uiaElements.Count -eq 0) {
+        Write-Warning 'UI Automation exposed no elements (the app may need an accessibility client or a CEF flag)'
+    }
+
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused) {
+        Write-Host ("Focused element: {0} '{1}' (automation id '{2}')" -f $focused.Current.ControlType.ProgrammaticName, $focused.Current.Name, $focused.Current.AutomationId)
+        $summary['FocusedElement'] = [pscustomobject]@{
+            ControlType = $focused.Current.ControlType.ProgrammaticName
+            Name = $focused.Current.Name
+            AutomationId = $focused.Current.AutomationId
+            ClassName = $focused.Current.ClassName
+        }
+    }
+
+    $edits = @($uiaElements | Where-Object { $_.ControlType -eq 'ControlType.Edit' })
+    Write-Host ("Editable fields: {0}" -f (($edits | ForEach-Object { "$($_.Name)/$($_.AutomationId)" }) -join ', '))
+    $summary['EditableFieldCount'] = $edits.Count
+
+    # Does the tree contain the text a login screen would show? Use it to separate "login" from
+    # "logged in", since the top-level window title never changes.
+    $text = ($uiaElements | ForEach-Object { "$($_.Name) $($_.AutomationId)" }) -join ' '
+    $summary['Hints'] = [pscustomobject]@{
+        MentionsUsername = $text -match 'Username|User Name|user'
+        MentionsPassword = $text -match 'Password'
+        MentionsSignIn   = $text -match 'Sign In|Log In|Login|Logon'
+        MentionsTwoFactor = $text -match 'Security Code|Two-Factor|2FA|Authenticator'
+        SampleText       = if ($text.Length -gt 800) { $text.Substring(0, 800) } else { $text }
+    }
+
+    # Can a UIA ValuePattern set the fields? That would allow a far more robust driver than SendInput.
+    $uiaProbe = @()
+    $editIndex = 0
+    foreach ($edit in $edits) {
+        $editIndex++
+        $element = $script:uiaMap[$edit.Path]
+        if (-not $element) { continue }
+
+        $result = [ordered]@{
+            Index = $editIndex; Name = $edit.Name; AutomationId = $edit.AutomationId
+            SetValue = $false; ReadBack = $null; Error = $null
+        }
+
+        try {
+            $valuePattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            $valuePattern.SetValue("probe-$editIndex")
+            $result.SetValue = $true
+            $result.ReadBack = $valuePattern.Current.Value
+        } catch {
+            $result.Error = $_.Exception.Message
+        }
+
+        $uiaProbe += [pscustomobject]$result
+    }
+
+    if ($uiaProbe.Count -gt 0) {
+        Write-Host 'UIA SetValue probe:'
+        $uiaProbe | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+    }
+
+    $summary['UiaSetValue'] = $uiaProbe
+    $summary['UiaElementCount'] = $uiaElements.Count
 }
 
 # Compare the observed titles with the patterns the manager ships.
 Write-Section 'Profile match'
 $profile = Get-Content (Join-Path $PSScriptRoot '..\src\IbkrManager.Core\app-profile.json') -Raw | ConvertFrom-Json
 $match = [ordered]@{
-    LoginPatterns = $profile.loginWindowTitlePatterns
-    ObservedLoginTitle = if ($loginWindow) { $loginWindow.Title } else { $null }
-    ClassifiedAsLogin = $false
+    LoginTitlePatterns = $profile.loginWindowTitlePatterns
+    ObservedTitle      = if ($mainWindow) { $mainWindow.Title } else { $null }
     TitleMatchesPattern = $false
+    TitleCannotDistinguishLogin = $false
+    ContentSuggestsLogin = [bool]($summary['Hints'] -and $summary['Hints'].MentionsUsername -and $summary['Hints'].MentionsPassword)
 }
-if ($loginWindow) {
-    foreach ($pattern in $profile.loginWindowTitlePatterns) {
-        if ($loginWindow.Title -like "*$pattern*") { $match.TitleMatchesPattern = $true; break }
+if ($mainWindow) {
+    foreach ($pattern in $profile.LoginTitlePatterns) {
+        if ($mainWindow.Title -like "*$pattern*") { $match.TitleMatchesPattern = $true; break }
     }
-    $match.ClassifiedAsLogin = $match.TitleMatchesPattern -or ($loginWindow.Title -match 'Login|Log In|Sign In|Logon')
+    # A constant title means the state machine needs a content signal, not just the title.
+    $match.TitleCannotDistinguishLogin = -not $match.TitleMatchesPattern
 }
 Write-Host ($match | ConvertTo-Json -Depth 4)
 
@@ -537,8 +612,8 @@ $summary | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $OutputDirectory 're
 
 # Markdown summary for the workflow run page.
 $exeText = if ($discovery.Executable) { $discovery.Executable } else { 'NOT FOUND' }
-$titleText = if ($loginWindow) { $loginWindow.Title } else { 'NOT FOUND' }
-$classText = if ($loginWindow) { $loginWindow.ClassName } else { '-' }
+$titleText = if ($mainWindow) { $mainWindow.Title } else { 'NOT FOUND' }
+$classText = if ($mainWindow) { $mainWindow.ClassName } else { '-' }
 $uiaCount = if ($summary['UiaSetValue']) { $summary['UiaSetValue'].Count } else { 0 }
 
 $markdown = @()
@@ -547,9 +622,11 @@ $markdown += ''
 $markdown += '| Item | Value |'
 $markdown += '|---|---|'
 $markdown += ('| Discovered executable | `' + $exeText + '` |')
-$markdown += ('| Login window title | `' + $titleText + '` |')
+$markdown += ('| Main window title | `' + $titleText + '` |')
 $markdown += ('| Window class | `' + $classText + '` |')
-$markdown += ('| Matches a login pattern | ' + $match.TitleMatchesPattern + ' |')
+$markdown += ('| Title matches a login pattern | ' + $match.TitleMatchesPattern + ' |')
+$markdown += ('| Content suggests a login form | ' + $match.ContentSuggestsLogin + ' |')
+$markdown += ('| UI Automation elements | ' + $summary.UiaElementCount + ' |')
 $markdown += ('| UIA editable fields | ' + $uiaCount + ' |')
 $markdown += ''
 $markdown += '## Windows'
@@ -565,14 +642,15 @@ if ($env:GITHUB_STEP_SUMMARY) {
     $markdown | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 }
 
-if (-not $loginWindow) {
+if (-not $mainWindow) {
     exit 2
 }
 
-if (-not $match.TitleMatchesPattern) {
-    Write-Error "The login window title '$($loginWindow.Title)' does not match app-profile.json ($($profile.loginWindowTitlePatterns -join ', '))"
+if (-not $match.TitleMatchesPattern -and -not $match.ContentSuggestsLogin) {
+    Write-Error ("Neither the title '{0}' nor the UI Automation content identifies a login screen. " +
+        "Update app-profile.json / the inspector so the manager can tell login from logged-in." -f $mainWindow.Title)
     exit 3
 }
 
-Write-Host 'Probe completed: install discovery and login-window classification verified against the real app' -ForegroundColor Green
+Write-Host 'Probe completed: install discovery and login-screen identification verified against the real app' -ForegroundColor Green
 exit 0
