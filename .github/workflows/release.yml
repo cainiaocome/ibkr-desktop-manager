@@ -21,11 +21,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -95,7 +95,7 @@ jobs:
           Write-Host "Packaged artifacts/$zip ($hash)"
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ steps.version.outputs.version }}
           path: |
@@ -120,6 +120,6 @@ jobs:
 
       - name: Attest build provenance
         if: ${{ github.ref_type == 'tag' && inputs.dry_run != true }}
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: artifacts/IbkrDesktopManager-${{ steps.version.outputs.version }}-win-x64.zip
