@@ -95,7 +95,10 @@ internal sealed class LoginForm : Form
 
         Controls.Add(layout);
         AcceptButton = submit;
+        KeyPreview = true;
         submit.Click += (_, _) => SignIn();
+        _username.TextChanged += (_, _) => WritePayload(submitted: false);
+        _password.TextChanged += (_, _) => WritePayload(submitted: false);
 
         if (options.SpawnChild)
         {
@@ -117,23 +120,61 @@ internal sealed class LoginForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        Activate();
         _username.Focus();
     }
 
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        // Keep the username field focused when the window is brought forward, like a browser-style
+        // login form does; without a focused control the keystrokes would be dropped.
+        if (!_username.Focused && !_password.Focused)
+        {
+            _username.Focus();
+        }
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Enter)
+        {
+            SignIn();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     private void SignIn()
+    {
+        WritePayload(submitted: true);
+
+        // Mimic IBKR: the login window turns into the security-code (2FA) prompt.
+        Text = "IBKR Desktop Security Code";
+    }
+
+    private void WritePayload(bool submitted)
     {
         var payload = new
         {
             username = _username.Text,
             password = _password.Text,
+            submitted,
+            activeControl = ActiveControl?.Name ?? "none",
+            focused = _password.Focused ? "password" : _username.Focused ? "username" : "none",
             childPid = _childPid,
             at = DateTimeOffset.UtcNow,
         };
 
-        File.WriteAllText(_options.OutputPath, JsonSerializer.Serialize(payload));
-
-        // Mimic IBKR: the login window turns into the security-code (2FA) prompt.
-        Text = "IBKR Desktop Security Code";
+        try
+        {
+            File.WriteAllText(_options.OutputPath, JsonSerializer.Serialize(payload));
+        }
+        catch (IOException)
+        {
+            // The reader may be mid-write; the next change retries.
+        }
     }
 
     private static int? _childPid;

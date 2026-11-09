@@ -73,8 +73,9 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
 
             Assert.True(File.Exists(harness.OutputPath),
-                "the stub never received a submit; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
+                "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
             var payload = TestHostFixture.ReadPayload(harness.OutputPath);
+            Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             Assert.Equal("test-user", payload.GetProperty("username").GetString());
             Assert.Equal("test-password", payload.GetProperty("password").GetString());
             Assert.Equal(AppStatus.AwaitingTwoFactor, state.Status);
@@ -177,8 +178,9 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             await harness.Manager.AutoLoginAsync();
 
             Assert.True(File.Exists(harness.OutputPath),
-                "the stub never received a submit; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
+                "the stub received no keystrokes at all; log:\n" + string.Join(Environment.NewLine, harness.Log.Messages));
             var payload = TestHostFixture.ReadPayload(harness.OutputPath);
+            Assert.True(payload.GetProperty("submitted").GetBoolean(), $"the form was never submitted: {payload}");
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
 
