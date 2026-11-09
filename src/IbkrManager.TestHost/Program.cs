@@ -108,16 +108,25 @@ internal sealed class LoginForm : Form
             SpawnChild();
         }
 
-        if (options.IgnoreClose)
+        FormClosing += (_, e) =>
         {
-            FormClosing += (_, e) =>
+            var ignored = options.IgnoreClose && e.CloseReason is CloseReason.UserClosing or CloseReason.None;
+            if (ignored)
             {
-                if (e.CloseReason == CloseReason.UserClosing)
-                {
-                    e.Cancel = true;
-                }
-            };
-        }
+                e.Cancel = true;
+            }
+
+            try
+            {
+                File.WriteAllText(
+                    _options.OutputPath + ".close",
+                    $"reason={e.CloseReason} ignore={options.IgnoreClose} cancelled={e.Cancel}");
+            }
+            catch (IOException)
+            {
+                // Diagnostics only.
+            }
+        };
     }
 
     protected override void OnShown(EventArgs e)

@@ -155,8 +155,11 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
 
             var stopped = await harness.Manager.QuitAsync();
 
+            var closeNote = ReadCloseNote(harness.OutputPath);
             Assert.Equal(AppStatus.Stopped, stopped.Status);
-            Assert.Contains("Terminated", stopped.LastAction);
+            Assert.True(stopped.LastAction!.Contains("Terminated", StringComparison.OrdinalIgnoreCase),
+                $"expected a kill, got '{stopped.LastAction}'; stub close note: {closeNote}; log:\n" +
+                string.Join(Environment.NewLine, harness.Log.Messages));
             Assert.False(IsAlive(started.ProcessId!.Value));
             TestHostFixture.WaitUntil(() => !IsAlive(childPid), TimeSpan.FromSeconds(10));
             Assert.False(IsAlive(childPid), "the child process should have been killed with the tree");
@@ -177,6 +180,12 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
 
         Assert.True(fixture.HostAvailable, $"test host was not copied to {fixture.HostPath}");
         return true;
+    }
+
+    private static string ReadCloseNote(string outputPath)
+    {
+        var path = outputPath + ".close";
+        return File.Exists(path) ? File.ReadAllText(path) : "(the app never saw a close request)";
     }
 
     private static UninstallRegistry UninstallRegistry() => new();
