@@ -110,7 +110,9 @@ internal sealed class LoginForm : Form
 
         FormClosing += (_, e) =>
         {
-            var ignored = options.IgnoreClose && e.CloseReason is CloseReason.UserClosing or CloseReason.None;
+            // Process.CloseMainWindow() posts a bare WM_CLOSE, which WinForms reports as
+            // TaskManagerClosing (not UserClosing), so an "app that refuses to quit" ignores both.
+            var ignored = options.IgnoreClose && e.CloseReason != CloseReason.WindowsShutDown;
             if (ignored)
             {
                 e.Cancel = true;
