@@ -12,6 +12,12 @@ public sealed record UiObservation(string? WindowTitle, IReadOnlyList<UiElementI
 {
     public bool IsEmpty => Elements.Count == 0;
 
+    /// <summary>
+    /// A window that has not finished loading exposes a single container and no content; such a
+    /// snapshot must not be used to conclude "logged in".
+    /// </summary>
+    public bool IsMeaningful => Elements.Count >= 3;
+
     public bool HasAutomationId(IReadOnlyList<string> patterns) =>
         Elements.Any(element => Contains(element.AutomationId, patterns));
 
@@ -82,9 +88,10 @@ public static class UiClassifier
                 return WindowKind.LoggedIn;
             }
 
-            // A snapshot was taken, the login markers are gone and no explicit logged-in marker
-            // exists: the app has moved past the login form (2FA prompt or main view).
-            if (profile.LoginAutomationIdPatterns.Count > 0 || profile.LoginButtonNames.Count > 0)
+            // A meaningful snapshot without login markers means the app has moved past the login
+            // form (2FA prompt or main view). A half-built tree falls through to the title.
+            if (observation.IsMeaningful &&
+                (profile.LoginAutomationIdPatterns.Count > 0 || profile.LoginButtonNames.Count > 0))
             {
                 return WindowKind.LoggedIn;
             }

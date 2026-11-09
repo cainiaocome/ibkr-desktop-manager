@@ -64,6 +64,24 @@ public sealed class UiAutomationTests
     }
 
     [Fact]
+    public void Half_built_tree_does_not_claim_the_user_is_logged_in()
+    {
+        // Right after launch the QML window exposes only its root pane. That snapshot must not be
+        // used to conclude "logged in": with no logged-in title pattern the result stays Unknown,
+        // so the state machine keeps reporting Launching/AwaitingLogin.
+        var observation = new UiObservation("IBKR Desktop",
+        [
+            new UiElementInfo("Control50033", "", "", false),
+        ]);
+
+        Assert.False(observation.IsMeaningful);
+        Assert.Equal(WindowKind.Unknown,
+            UiClassifier.Classify(Profile with { LoggedInWindowTitlePatterns = [] }, "IBKR Desktop", observation));
+        Assert.Equal(WindowKind.Login,
+            UiClassifier.Classify(Profile with { LoggedInWindowTitlePatterns = [] }, "IBKR Desktop - Login", observation));
+    }
+
+    [Fact]
     public void Empty_observation_falls_back_to_the_title()
     {
         var observation = new UiObservation("IBKR Desktop", []);

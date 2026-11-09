@@ -63,7 +63,16 @@ public sealed class RealIbkDesktopTests(ITestOutputHelper output)
         try
         {
             await manager.InitializeAsync();
-            var state = await manager.StartAsync();
+            await manager.StartAsync();
+
+            // The QML tree fills in a few seconds after the window handle exists.
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+            while (DateTimeOffset.UtcNow < deadline && uia.FindLoginControls() is null)
+            {
+                Thread.Sleep(1000);
+            }
+
+            var state = await manager.TickAsync();
             output.WriteLine(string.Join(Environment.NewLine, log.Messages));
 
             var observation = uia.Observe();
