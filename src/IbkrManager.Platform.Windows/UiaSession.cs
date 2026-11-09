@@ -389,6 +389,9 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
     private static IUIAutomationCacheRequest CreateCacheRequest(CUIAutomation automation)
     {
         var cache = automation.CreateCacheRequest();
+        // FindAllBuildCache requires the request's own scope; without it UIA rejects the call with
+        // "Value does not fall within the expected range".
+        cache.TreeScope = TreeScope.TreeScope_Subtree;
         cache.AddProperty(UIA_PropertyIds.UIA_ControlTypePropertyId);
         cache.AddProperty(UIA_PropertyIds.UIA_NamePropertyId);
         cache.AddProperty(UIA_PropertyIds.UIA_AutomationIdPropertyId);
@@ -435,7 +438,8 @@ public sealed class UiaSession(IProcessController process, AppProfile profile, I
     };
 
     private static bool IsUiaFailure(Exception ex) =>
-        ex is COMException or InvalidCastException or PlatformNotSupportedException or DllNotFoundException or TimeoutException;
+        ex is COMException or ArgumentException or InvalidCastException or PlatformNotSupportedException or
+            DllNotFoundException or TimeoutException;
 
     /// <summary>
     /// Runs a UIA operation on a short-lived STA thread. A call that does not return in time parks the
