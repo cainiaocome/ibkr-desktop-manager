@@ -66,7 +66,7 @@ jobs:
         if: matrix.os == 'windows-latest' && vars.IBKR_INTERACTIVE_SESSION != 'true'
         shell: pwsh
         run: |
-          Write-Host "::notice title=Keyboard injection not covered::Hosted Windows runners are service sessions with no input desktop, so SendInput keystrokes are dropped. Everything else (registry discovery, launch/attach, window classification, graceful close, process-tree kill) is covered by the integration suite. To cover typing, run 'dotnet test -c Release --filter Category=InteractiveDesktop' on a console/RDP session or a self-hosted interactive runner."
+          Write-Host "::notice title=Keyboard injection not covered::Hosted Windows runners run jobs in a non-active service session, so SendInput keystrokes are discarded. Everything else (registry discovery, launch/attach, window classification, graceful close, process-tree kill) is covered by the integration suite. To cover typing, run 'dotnet test -c Release --filter Category=InteractiveDesktop' on a console/RDP session or a self-hosted interactive runner."
 
       - name: Upload test results
         if: always()

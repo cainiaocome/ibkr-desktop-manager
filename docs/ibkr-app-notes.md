@@ -34,7 +34,7 @@ change — except for the tab order and submit behaviour, which the SendInput dr
 | Graceful `WM_CLOSE`, kill-on-timeout, process-tree cleanup | same |
 | Credential Manager and HKCU\Environment round-trip | platform tests on `windows-latest` |
 | Keystroke sequence (select-all, username, Tab, password, Enter) | platform unit tests with a faked keyboard |
-| Keystroke *delivery* to a focused control | `Category=InteractiveDesktop` test — needs a console/RDP/self-hosted session; hosted runners have no input desktop |
+| Keystroke *delivery* to a focused control | `Category=InteractiveDesktop` test — needs an active console/RDP/self-hosted session; hosted runners are non-active service sessions and discard injected input |
 | Real IBKR window titles, focus-on-open, tab order, Enter-to-submit | **spike below** |
 
 ## Spike tasks (do these on a real Windows install)

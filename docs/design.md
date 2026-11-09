@@ -334,8 +334,9 @@ named `ibkr-testhost.exe` registered in `HKCU\...\Uninstall` — so registry dis
 window-title classification, `WM_CLOSE`, job-object cleanup and process-tree kill are all exercised
 against real Win32, not fakes.
 
-Synthetic keyboard input is the exception: hosted Windows runners run jobs in a service session with
-no input desktop, so `SendInput` returns success but nothing is delivered. The keystroke sequence is
+Synthetic keyboard input is the exception: hosted Windows runners run jobs in a non-active service
+session (`WTSConnectState` ≠ `WTSActive`), so `SendInput` reports success but the keystrokes are
+discarded. The keystroke sequence is
 unit-tested through the `IKeyboardInput` seam; the delivery test is tagged
 `Category=InteractiveDesktop`, detects the session (`OpenInputDesktop`) and skips with a logged
 reason elsewhere. CI prints a notice so the gap is visible instead of silently green.

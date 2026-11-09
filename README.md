@@ -120,9 +120,9 @@ by the `windows-latest` CI job, which runs the manager against the stub app for 
 | Graceful `WM_CLOSE` quit, process-tree kill | skip | **real integration tests** | — |
 | `SendInput` keystrokes reaching a focused field | sequence unit tests (faked keyboard) | not delivered¹ | **integration test** |
 
-¹ Hosted Windows runners are service sessions: windows exist and can be focused, but there is no
-input desktop, so synthetic keystrokes are dropped. Run the typing check on a console/RDP session or
-a self-hosted interactive runner:
+¹ Hosted Windows runners execute jobs in a non-active service session (`WTSConnectState` is not
+`WTSActive`). Windows are created, enumerated and focused normally, but injected keystrokes are
+discarded. Run the typing check on a console/RDP session or a self-hosted interactive runner:
 
 ```powershell
 dotnet test tests/IbkrManager.IntegrationTests -c Release --filter "Category=InteractiveDesktop"

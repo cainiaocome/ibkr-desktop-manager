@@ -24,8 +24,8 @@ anything touching processes, registry or Credential Manager.
 `ibkr-testhost.exe`) through the real platform layer on Windows: registry discovery, launch/attach,
 window classification, graceful close and process-tree kill.
 
-**Hosted Windows runners are service sessions**: windows can be created and focused but there is no
-input desktop, so `SendInput` keystrokes are silently dropped. The keystroke *sequence* is unit-tested
+**Hosted Windows runners run jobs in a non-active service session** (`WTSConnectState` is not
+`WTSActive`): windows can be created and focused, but `SendInput` keystrokes are silently discarded. The keystroke *sequence* is unit-tested
 with a faked `IKeyboardInput`; actual delivery is covered by
 `dotnet test --filter "Category=InteractiveDesktop"`, which only does something on a console/RDP or
 self-hosted interactive runner. Do not "fix" a skipped typing test by weakening it — verify the
