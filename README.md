@@ -96,7 +96,7 @@ started (that is the kill-on-close job object doing its job).
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 143 tests: core, platform, view models, headless UI render, Windows integration
+dotnet test                        # 154 tests: core, platform, view models, headless UI render, Windows integration
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App
 ```
@@ -125,7 +125,8 @@ by the `windows-latest` CI job, which runs the manager against the stub app for 
 | Graceful `WM_CLOSE` quit, process-tree kill | skip | **real integration tests** | — |
 | Login form identification (QML automation ids) | classifier unit tests | **real-app probe + tests** | — |
 | Locating the fields (rectangles) | pointer driver unit tests (faked session) | **real-app probe + tests** | — |
-| Filling the login form | pointer driver unit tests (click/type order, read-back guard) | not delivered¹ | **integration test** (stub window) |
+| Typing into the real app | pointer driver unit tests (click/type order, strategy fallback, read-back guards) | **real-app end-to-end: "Login failed" dialog + screenshot** | **integration test** (stub window) |
+| Waiting for the verdict | outcome unit tests (2FA, refusal dialog, progress, timeout) | **real-app end-to-end** | — |
 | `SendInput` keystrokes reaching a focused field | sequence unit tests (faked keyboard) | not delivered¹ | **integration test** |
 
 ¹ Hosted Windows runners execute jobs in a non-active service session (`WTSConnectState` is not
@@ -147,8 +148,10 @@ gh workflow run ibkr-probe.yml            # installs IBKR Desktop on a Windows r
 ```
 
 The workflow (also weekly) installs the app, dumps the accessibility tree/windows/screenshot, fails
-if the QML automation ids no longer match `app-profile.json`, and runs the `Category=RealIbkDesktop`
-tests.
+if the QML automation ids or the clickable field rectangles no longer match `app-profile.json`, and
+runs the `Category=RealIbkDesktop` tests — including an **end-to-end login with a random username and
+password** that must end in IBKR's "Login failed" dialog. Screenshots of every stage are uploaded as
+artifacts (`TestResults/e2e/`).
 
 ## Releasing
 

@@ -41,7 +41,7 @@ Measured on a real installation by the `IBKR Desktop probe` workflow (full detai
 | Installer is install4j; `-q -dir C:\ntws -overwrite` installs unattended; registry `DisplayName="IBKR Desktop"`, `InstallLocation="C:\ntws"`, version `latest (4.0d) …` | Resolve from the registry uninstall keys; CI can install the real app |
 | Launcher **`ntws.exe`**, 64-bit, runs the app in-process (no `java.exe` child) | Kill the process **tree** anyway — the app spawns helpers |
 | The UI is **Qt 6.8 QML + CEF**, window class `Qt683QWindowIcon`, and the top-level title is **always `IBKR Desktop`** | Title-based classification can never distinguish login from logged-in; use accessibility content |
-| UIA exposes `QApplication.launcherLoginWindow` with two `TextField_QMLTYPE_74` edits and a `Log In` button, and `ValuePattern.SetValue` works on both fields | UIA is the primary login driver: deterministic, no focus/tab-order, works without an input desktop |
+| UIA exposes `QApplication.launcherLoginWindow` with two `TextField_QMLTYPE_*` edits (with screen rectangles) and a `Log In` button; `ValuePattern.SetValue` reports success but the QML form ignores it | Accessibility is used for *identification and geometry*, never to write values; the fields are clicked and typed into |
 | Login frequently requires 2FA/security-code | Auto-login stops at "awaiting 2FA"; a human finishes. GUI must say so |
 | App self-updates and renames QML objects between versions | All matching is profile-driven and fail-soft; the probe workflow turns red when ids change |
 
@@ -140,12 +140,20 @@ injected without that explicit click.
   before launching, log which field is missing, show an inline error banner. Never prompt, never
   guess.
 - Both present → ensure the app is running (launch if `Stopped`), wait for the login window if needed.
-- Then run the injection ladder, first success wins, each step switchable in settings:
-  1. `Native` — JVM property / config-file injection, *if* the spike proves IBKR Desktop accepts it.
-  2. `Uia` — find the two edits via FlaUI, `ValuePattern` or focus+type; clipboard paste
-     (restored immediately) for fields that reject typed input.
-  3. `SendInput` — focus window, `Tab`/typed keystrokes from the profile.
-  4. `Manual` — skip injection, tell the user to type it themselves (fallback, not default).
+- Then run the injection ladder, first *verified* success wins:
+  1. `pointer` — UI Automation locates the fields and their screen rectangles. On an interactive
+     desktop the manager clicks them with real mouse events and types with `SendInput`; otherwise it
+     posts the same clicks/characters as window messages, which the app processes in its own loop
+     (this is what makes auto-login work in a service session or against an elevated app).
+     After typing it reads the username back, requires the password field to report characters, and
+     requires the username to still be intact — a form that merely *looks* filled is the failure mode
+     this driver exists to prevent.
+  2. `uia` — `ValuePattern.SetValue` + `InvokePattern`; kept for toolkits that propagate values.
+  3. `sendinput` — blind tab-order typing, no verification.
+  4. `manual` — skip injection, tell the user to type it themselves (fallback, not default).
+- Then **wait for IBKR's verdict**: the form is replaced by "Connecting to server…", so a missing
+  form is not success. The manager reports the app's own message (or its refusal dialog), a 2FA
+  screen, or a timeout.
 5. **Stop at 2FA**: never attempt to solve it. Show "Awaiting 2FA" and keep monitoring.
 6. **Quit**: post `WM_CLOSE` to the main window → wait 15 s → `Kill(entireProcessTree: true)`.
    Log which path was taken.
@@ -285,12 +293,12 @@ No secrets are needed for CI; signing secrets are the only ones and live in GitH
 
 | # | Deliverable | Done when |
 |---|---|---|
-| 0 | **Spike** (`docs/ibkr-app-notes.md`): install real app, inventory install paths, process tree, window classes/titles, Accessibility Insights/Inspect dump of the login form, try `-D`/config-arg credential paths | We know which login driver is realistic | **pending** (needs a Windows box) |
+| 0 | **Spike** (`docs/ibkr-app-notes.md`): install real app, inventory install paths, process tree, window classes/titles, accessibility dump of the login form | We know which login driver is realistic | done — automated by the `IBKR Desktop probe` workflow |
 | 1 | Skeleton: solution, Avalonia window, `Core` abstractions, CI green | `dotnet test` passes on `windows-latest` | done |
 | 2 | Read-only status: locator, process/window polling, credential resolution + source, version | GUI shows live state, no actions yet | done |
 | 3 | Credentials dialog + persistence (Credential Manager, opt-in env vars, Clear) | Values survive restart, shadowing is visible, `Clear` wipes both | done |
 | 4 | Lifecycle: start / quit / restart, Job Object, single instance, logs | Start+quit reliable across 20 cycles, no orphans | done (real-app soak still part of the spike) |
-| 5 | Auto-login button: validation, SendInput driver, 2FA hand-off | Clicking Auto Login reaches the 2FA prompt; missing creds produce a clear error; failures fall back to manual | done (UIA/native drivers pending spike) |
+| 5 | Auto-login button: validation, click-and-type driver, 2FA hand-off | Clicking Auto Login types the credentials, waits for IBKR's verdict; missing creds produce a clear error; failures fall back to manual | done, verified by the real-app end-to-end test |
 | 6 | Release pipeline + settings + signing decision | Tagged release has zip + checksums, CI badge green | done (signing wired, off until a cert exists) |
 
 **Risks**: UI automation breaks on app updates (mitigated by profile config + fail-soft to manual);
@@ -309,7 +317,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.1.2)
+## 11. Implementation status (v0.1.3)
 
 What shipped, and where it lives:
 
@@ -324,7 +332,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-state classification | `Core/UiAutomation.cs` (`UiClassifier`, accessibility first, title second) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 143 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 154 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

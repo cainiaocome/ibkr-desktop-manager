@@ -55,11 +55,19 @@ Pressing **Auto Login**:
    `Auto Login blocked: IBKR_PASSWORD is not set` — nothing is launched in that case;
 2. launches IBKR Desktop if it is not already running and waits for the login window;
 3. **clicks the fields and types the credentials like a person** — UI Automation supplies the screen
-   rectangles, the manager clicks the username field, replaces its contents and types, does the same
-   for the password, then clicks `Log In`;
-4. **verifies the typing landed** by reading the username field back — if the app did not receive the
-   characters, the login stops with an error instead of submitting an empty form;
-5. waits for the login form to disappear and reports *Awaiting 2FA*, or a failure.
+   rectangles, the manager clicks the username field, replaces its contents and types, moves to the
+   password with `Tab` (falling back to a click), types it, then clicks `Log In`;
+4. **verifies the typing landed** before submitting: the username is read back, the password field
+   must report characters, and the username must still be intact (which proves the password went
+   into the password field rather than being appended to the username);
+5. **waits for IBKR to answer**. The login form is replaced by "Connecting to server…", so a missing
+   form is not treated as success: the manager keeps watching and reports *IBKR reported a login
+   failure* (quoting the app's message when it exposes one), *Awaiting 2FA*, or a timeout.
+
+If real mouse/keyboard events are discarded — a service session, a scheduled task, or IBKR Desktop
+running elevated — the manager repeats the same clicks and keystrokes as posted window messages,
+which the app processes in its own event loop. You will see `credentials typed with the posted
+strategy` in the log when that happens.
 
 It is UI automation, not an IBKR API. Consequences:
 

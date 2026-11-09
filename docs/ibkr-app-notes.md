@@ -19,6 +19,8 @@ observed by installing the real app on a Windows runner — see the `IBKR Deskto
 | Login button | `ControlType.Button`, Name **`Log In`** |
 | Field order | first Edit = username (has keyboard focus on open), second = password; `CurrentIsPassword` is not reliably set, so the driver falls back to document order |
 | Setting values | `ValuePattern.SetValue` *reports* success on both fields, but IBKR ignores it (see above) |
+| Posted window messages | `WM_LBUTTONDOWN`/`WM_CHAR` posted to the window do reach the QML fields (verified in a service session where `SendInput` is discarded) |
+| Wrong credentials | "Connecting to server…" progress, then a "Login failed" dialog with an `OK` button |
 | Field geometry | both edits and the `Log In` button report a clickable screen rectangle |
 | Installer quirk | after copying the files the wizard can keep running (it auto-launches the app); poll for `ntws.exe` instead of waiting for the installer to exit |
 
@@ -46,6 +48,22 @@ So the login driver **clicks each field with the mouse and types with real keyst
 
 UI Automation is still used for *identification*, which the constant title cannot provide, and
 `ValuePattern.SetValue` remains as a fallback driver for builds that do propagate it.
+
+## How a wrong password looks (verified end to end in CI)
+
+The `IBKR Desktop probe` workflow now logs in for real: it types a random username/password, clicks
+`Log In`, and waits. The observed sequence is:
+
+1. the login form is replaced by a progress bar — "Connecting to server (trying for another N
+   seconds)…";
+2. IBKR's backend refuses the random credentials;
+3. the form comes back with a **modal dialog titled "Login failed"** ("Passwords are case sensitive.
+   If you need to retrieve your username or reset your password, you can do so here…") and an `OK`
+   button.
+
+Important for automation: the dialog's **text is not exposed through UI Automation** — only its
+buttons (`OK`) are. So the failure verdict is detected by the dialog's button, and the message itself
+is verified by looking at the screenshot artifact (`e2e-verdict-screen.png`).
 
 ## Why UI Automation is the primary login driver
 

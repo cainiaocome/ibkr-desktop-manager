@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 143 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 154 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -87,6 +87,13 @@ Facts learned the hard way (do not regress them):
 - Run UIA calls on an STA thread; Qt's provider misbehaves from MTA threads.
 - The install4j wizard can stay alive after copying files (it auto-launches the app): poll for
   `ntws.exe` rather than waiting for the installer to exit.
+- A real login attempt is asynchronous: "Connecting to server…" replaces the form, and a refusal
+  brings it back with a **QML dialog titled "Login failed"** whose text is *not* exposed through UI
+  Automation — only its `OK` button is. Detecting the button is the reliable verdict; the wording is
+  only visible in screenshots (`TestResults/e2e/e2e-verdict-screen.png`).
+- Hosted Windows runners are a service session: `SendInput` is discarded, but posted window messages
+  (`WM_LBUTTONDOWN`, `WM_CHAR`) reach the QML fields. Never "fix" a typing test by weakening it —
+  check which strategy the driver log says was used.
 
 ## Conventions
 

@@ -171,18 +171,20 @@ public sealed class RealLoginE2ETests(ITestOutputHelper output)
                 observed.Add(text);
             }
 
-            var rejection = texts.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text));
-            if (rejection is not null)
+            var verdict = new Verdict(
+                texts.FirstOrDefault(text => Rejection.IsMatch(text) && !EmptyFormPrompt.IsMatch(text)),
+                texts.FirstOrDefault(text => DialogButtons.Contains(text, StringComparer.OrdinalIgnoreCase)));
+            if (verdict.Text is not null || verdict.DialogButton is not null)
             {
-                report["verdictWindows"] = appWindows.Select(window => window.ToString()).ToList();
-                return new Verdict(rejection, null);
-            }
+                var path = Path.Combine(outputDirectory, "e2e-verdict-screen.png");
+                if (Capture.TryCaptureScreen(path))
+                {
+                    snapshots.Add(path);
+                }
 
-            var dialogButton = texts.FirstOrDefault(text => DialogButtons.Contains(text, StringComparer.OrdinalIgnoreCase));
-            if (dialogButton is not null)
-            {
                 report["verdictWindows"] = appWindows.Select(window => window.ToString()).ToList();
-                return new Verdict(null, dialogButton);
+                report["verdictTexts"] = texts;
+                return verdict;
             }
 
             if (DateTimeOffset.UtcNow >= nextCapture)
