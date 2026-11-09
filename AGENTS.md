@@ -49,12 +49,18 @@ The dev box is ephemeral, so after a reset re-install:
    `global.json` pins SDK 8.0 with `rollForward: latestFeature`, so any 8.0.4xx works.
 
 2. **Optional, only for UI screenshots by hand**: `sudo apt-get install -y xvfb x11-apps imagemagick`
-   (`Xvfb :77`, `import -window root out.png`). The committed screenshots come from the headless
+   (`Xvfb :77`, `import -window root out.png`). The committed UI screenshots come from the headless
    Skia tests, so this is not needed for normal work.
 
 3. **Optional, only for validating workflow YAML**: `sudo apt-get install -y python3-yaml`
    (or `python3 -m pip install --break-system-packages pyyaml`), then
    `python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]"`.
+
+4. **Optional, only to lint `scripts/probe-ibkr.ps1` on Linux**: PowerShell 7 tarball into
+   `/opt/pwsh` (`curl -sSL -o /tmp/pwsh.tgz https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz`,
+   `sudo mkdir -p /opt/pwsh && sudo tar -xzf /tmp/pwsh.tgz -C /opt/pwsh && sudo chmod +x /opt/pwsh/pwsh`), then
+   `/opt/pwsh/pwsh -Command '$e=$null;$t=$null;[void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "scripts/probe-ibkr.ps1"),[ref]$t,[ref]$e); $e.Count'`
+   (0 = clean). `p7zip-full` is handy for inspecting installers.
 
 NuGet packages restore into `~/.nuget/packages` automatically; no other system dependencies.
 
