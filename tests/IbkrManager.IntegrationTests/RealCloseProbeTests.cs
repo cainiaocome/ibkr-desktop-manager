@@ -87,10 +87,31 @@ public sealed class RealCloseProbeTests(ITestOutputHelper output)
 
             report["exitedAfterMilliseconds"] = exitedAfter;
             report["survivedTheClose"] = process.IsRunning;
-            report["log"] = log.Messages.ToList();
             output.WriteLine(exitedAfter is null
                 ? "the app did not exit after WM_CLOSE"
                 : $"the app exited after {exitedAfter} ms");
+
+            // The production Quit path, against the same real app: it must report a graceful close and
+            // must not need to terminate anything.
+            var relaunched = await manager.StartAsync();
+            report["quit.relaunched"] = relaunched.Status.ToString();
+            Assert.True(
+                await WaitForLoginControlsAsync(manager, uia, TimeSpan.FromMinutes(3)) is not null,
+                "the login form did not come back after the relaunch");
+
+            var quitStarted = DateTimeOffset.UtcNow;
+            var quit = await manager.QuitAsync();
+            report["quit.status"] = quit.Status.ToString();
+            report["quit.lastAction"] = quit.LastAction;
+            report["quit.lastError"] = quit.LastError;
+            report["quit.elapsedMilliseconds"] = (int)(DateTimeOffset.UtcNow - quitStarted).TotalMilliseconds;
+            report["quit.stillRunning"] = process.IsRunning;
+            report["log"] = log.Messages.ToList();
+            output.WriteLine($"manager.QuitAsync() -> {quit.Status}: {quit.LastAction}");
+
+            Assert.False(process.IsRunning, "the app was still running after Quit");
+            Assert.Equal("Stopped", quit.Status.ToString());
+            Assert.Equal("Closed gracefully", quit.LastAction);
         }
         finally
         {

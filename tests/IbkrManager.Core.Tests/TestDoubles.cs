@@ -54,6 +54,9 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
 
     public bool ExitOnWait { get; set; } = true;
 
+    /// <summary>Number of WaitForExitAsync calls before the app is finally gone.</summary>
+    public int ExitAfterWaits { get; set; } = 1;
+
     public Func<bool>? OnStart { get; set; }
 
     public Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default)
@@ -78,7 +81,7 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
     public Task<bool> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         WaitForExitCount++;
-        if (!ExitOnWait)
+        if (!ExitOnWait || WaitForExitCount < ExitAfterWaits)
         {
             return Task.FromResult(false);
         }
@@ -96,6 +99,19 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
         MainWindowTitle = null;
         HasVisibleWindow = false;
         return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakeCloseConfirmationPrompt : ICloseConfirmationPrompt
+{
+    public CloseConfirmation Result { get; set; } = CloseConfirmation.NotShown;
+
+    public int CallCount { get; private set; }
+
+    public Task<CloseConfirmation> AnswerAsync(CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        return Task.FromResult(Result);
     }
 }
 

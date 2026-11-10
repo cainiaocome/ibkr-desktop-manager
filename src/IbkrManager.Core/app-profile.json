@@ -15,6 +15,7 @@
   "loginButtonNames": ["Log In"],
   "twoFactorAutomationIdPatterns": [],
   "loggedInAutomationIdPatterns": [],
+  "quitConfirmationButtonNames": ["Yes", "Quit", "Exit", "Confirm", "OK"],
   "launchTimeoutSeconds": 120,
   "loginWindowTimeoutSeconds": 120,
   "gracefulShutdownTimeoutSeconds": 15,

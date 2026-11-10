@@ -10,6 +10,16 @@ public sealed class PostedWindowInput(IProcessController process) : IPostedInput
             return false;
         }
 
+        return Click(window, screenX, screenY);
+    }
+
+    public bool Click(IntPtr window, int screenX, int screenY)
+    {
+        if (window == IntPtr.Zero)
+        {
+            return false;
+        }
+
         var point = new NativeMethods.POINT { X = screenX, Y = screenY };
         if (!NativeMethods.ScreenToClient(window, ref point))
         {

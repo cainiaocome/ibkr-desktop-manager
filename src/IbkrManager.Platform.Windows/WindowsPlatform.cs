@@ -40,6 +40,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
 
         _process = new Win32ProcessController(Profile, Log);
         var uia = new UiaSession(_process, Profile, Log);
+        var postedInput = new PostedWindowInput(_process);
         var driver = new SelectingLoginDriver(
             () => SettingsStore.Load().LoginDriver,
             // Blind tab-order typing is deliberately not in the production chain: with no login form
@@ -49,7 +50,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
                     uia,
                     _process,
                     Log,
-                    postedInput: new PostedWindowInput(_process),
+                    postedInput: postedInput,
                     inspector: uia),
                 new UiaLoginDriver(uia, Log)),
             new ManualLoginDriver());
@@ -66,7 +67,8 @@ public sealed class WindowsPlatform : IPlatformRuntime
             driver,
             Profile,
             SystemClock.Instance,
-            Log);
+            Log,
+            closeConfirmation: new UiCloseConfirmation(_process, Profile, Log, posted: postedInput));
     }
 
     public IAppManager Manager { get; }

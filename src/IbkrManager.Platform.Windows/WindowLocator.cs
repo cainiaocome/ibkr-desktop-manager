@@ -14,6 +14,29 @@ internal static class WindowLocator
         var best = IntPtr.Zero;
         long bestArea = 0;
 
+        foreach (var window in FindWindows(processId))
+        {
+            if (!NativeMethods.GetWindowRect(window, out var rect))
+            {
+                continue;
+            }
+
+            long area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
+            if (area > bestArea)
+            {
+                best = window;
+                bestArea = area;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Every visible, titled top-level window of the process, largest first.</summary>
+    public static IReadOnlyList<IntPtr> FindWindows(int processId)
+    {
+        var windows = new List<IntPtr>();
+
         NativeMethods.EnumWindows((window, _) =>
         {
             NativeMethods.GetWindowThreadProcessId(window, out var owner);
@@ -24,22 +47,21 @@ internal static class WindowLocator
                 return true;
             }
 
-            if (!NativeMethods.GetWindowRect(window, out var rect))
+            if (NativeMethods.GetWindowRect(window, out var rect))
             {
-                return true;
-            }
-
-            long area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
-            if (area > bestArea)
-            {
-                best = window;
-                bestArea = area;
+                windows.Add(window);
             }
 
             return true;
         }, IntPtr.Zero);
 
-        return best;
+        return windows
+            .OrderByDescending(window =>
+            {
+                NativeMethods.GetWindowRect(window, out var rect);
+                return (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
+            })
+            .ToList();
     }
 
     public static string? Title(IntPtr window)

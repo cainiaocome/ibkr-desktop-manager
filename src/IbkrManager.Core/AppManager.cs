@@ -14,6 +14,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private readonly ILoginDriver _loginDriver;
     private readonly IClock _clock;
     private readonly IAppLog _log;
+    private readonly ICloseConfirmationPrompt _closeConfirmation;
     private readonly TimeSpan _pollInterval;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -35,7 +36,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         AppProfile profile,
         IClock clock,
         IAppLog log,
-        TimeSpan? pollInterval = null)
+        TimeSpan? pollInterval = null,
+        ICloseConfirmationPrompt? closeConfirmation = null)
     {
         _locator = locator;
         _process = process;
@@ -44,6 +46,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         Profile = profile;
         _clock = clock;
         _log = log;
+        _closeConfirmation = closeConfirmation ?? NullCloseConfirmationPrompt.Instance;
         _pollInterval = pollInterval ?? DefaultPollInterval;
     }
 
@@ -193,22 +196,58 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
                 return;
             }
 
-            var requested = await _process.CloseMainWindowAsync(ct).ConfigureAwait(false);
-            var exited = requested && await _process.WaitForExitAsync(Profile.GracefulShutdownTimeout, ct).ConfigureAwait(false);
+            var outcome = await TryCloseAsync(ct).ConfigureAwait(false);
+            _stopping = false;
+            _lastAction = outcome.Message;
 
-            if (exited)
+            if (outcome.Exited)
             {
-                _stopping = false;
-                _lastAction = "Closed gracefully";
-                _log.Info("IBKR Desktop closed gracefully");
+                _log.Info(outcome.Message);
                 return;
             }
 
-            _log.Warn("IBKR Desktop did not exit after the graceful close request; terminating the process tree");
-            await _process.KillAsync(ct).ConfigureAwait(false);
-            _stopping = false;
-            _lastAction = "Terminated after the graceful close timed out";
+            // Deliberately no escalation to TerminateProcess: the app may still be flushing state, and
+            // killing it is what the user asked us to stop doing. Force Quit is the explicit way out.
+            _log.Warn($"{outcome.Message}; the process was left running (use Force Quit to end it)");
         });
+
+    /// <summary>
+    /// Asks IBKR Desktop to close, answers its confirmation if it shows one, and reports the outcome.
+    /// Never terminates the process.
+    /// </summary>
+    private async Task<CloseOutcome> TryCloseAsync(CancellationToken cancellationToken)
+    {
+        var requested = await _process.CloseMainWindowAsync(cancellationToken).ConfigureAwait(false);
+        if (!requested)
+        {
+            return new CloseOutcome(false, CloseConfirmation.NotShown, "The close request could not be delivered");
+        }
+
+        if (await _process.WaitForExitAsync(Profile.GracefulShutdownTimeout, cancellationToken).ConfigureAwait(false))
+        {
+            return new CloseOutcome(true, CloseConfirmation.NotShown, "Closed gracefully");
+        }
+
+        // Still there: the app is most likely asking "really quit?".
+        var confirmation = await _closeConfirmation.AnswerAsync(cancellationToken).ConfigureAwait(false);
+        if (confirmation == CloseConfirmation.Answered)
+        {
+            _log.Info("Answered IBKR Desktop's quit confirmation");
+            if (await _process.WaitForExitAsync(Profile.GracefulShutdownTimeout, cancellationToken).ConfigureAwait(false))
+            {
+                return new CloseOutcome(true, confirmation, "Closed gracefully after answering its confirmation");
+            }
+        }
+
+        return new CloseOutcome(false, confirmation, confirmation switch
+        {
+            CloseConfirmation.Answered => "IBKR Desktop stayed open after its confirmation was answered",
+            CloseConfirmation.CouldNotAnswer => "IBKR Desktop is waiting for confirmation in its own window",
+            _ => "IBKR Desktop did not exit after the close request",
+        });
+    }
+
+    private readonly record struct CloseOutcome(bool Exited, CloseConfirmation Confirmation, string Message);
 
     public Task<AppState> RestartAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Restart", cancellationToken, async ct =>
@@ -220,12 +259,13 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             _stopping = true;
             if (_process.IsRunning)
             {
-                var requested = await _process.CloseMainWindowAsync(ct).ConfigureAwait(false);
-                var exited = requested && await _process.WaitForExitAsync(Profile.GracefulShutdownTimeout, ct).ConfigureAwait(false);
-                if (!exited)
+                var outcome = await TryCloseAsync(ct).ConfigureAwait(false);
+                if (!outcome.Exited)
                 {
-                    _log.Warn("Restart: graceful close timed out, terminating the process tree");
-                    await _process.KillAsync(ct).ConfigureAwait(false);
+                    _stopping = false;
+                    throw new AppManagerException(
+                        $"Restart needs the running app to close, but {outcome.Message.ToLowerInvariant()}. " +
+                        "Nothing was terminated: answer the app's confirmation, or use Force Quit and then Start.");
                 }
             }
 
@@ -283,16 +323,19 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             catch (OperationCanceledException)
             {
                 _lastAction = $"{action} cancelled";
+                _stopping = false;
                 throw;
             }
             catch (AppManagerException ex)
             {
+                _stopping = false;
                 _failed = true;
                 _lastError = ex.Message;
                 _log.Warn($"{action}: {ex.Message}");
             }
             catch (Exception ex)
             {
+                _stopping = false;
                 _failed = true;
                 _lastError = $"{action} failed: {ex.Message}";
                 _log.Error($"{action} failed", ex);

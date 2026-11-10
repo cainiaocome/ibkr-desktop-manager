@@ -49,7 +49,8 @@
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button Content="Start" Command="{Binding StartCommand}" Width="90" Classes="accent" />
           <Button Content="Auto Login" Command="{Binding AutoLoginCommand}" Width="110" />
-          <Button Content="Quit" Command="{Binding QuitCommand}" Width="80" />
+          <Button Content="Quit" Command="{Binding QuitCommand}" Width="80" ToolTip.Tip="Asks IBKR Desktop to close and answers its own confirmation; never kills it" />
+          <Button Content="Force Quit" Command="{Binding ForceQuitCommand}" Width="100" ToolTip.Tip="Terminates the process tree immediately, skipping IBKR Desktop's cleanup" />
           <Button Content="Restart" Command="{Binding RestartCommand}" Width="90" />
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">

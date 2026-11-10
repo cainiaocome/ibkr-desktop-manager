@@ -143,17 +143,80 @@ public sealed class AppManagerTests
     }
 
     [Fact]
-    public async Task Quit_escalates_to_killing_the_process_tree()
+    public async Task Quit_answers_the_apps_own_confirmation()
     {
+        var harness = new Harness();
+        await harness.Manager.StartAsync();
+        harness.Process.ExitAfterWaits = 2;
+        harness.Confirmation.Result = CloseConfirmation.Answered;
+
+        var state = await harness.Manager.QuitAsync();
+
+        Assert.Equal(1, harness.Confirmation.CallCount);
+        Assert.Equal(0, harness.Process.KillCount);
+        Assert.Equal(AppStatus.Stopped, state.Status);
+        Assert.Equal("Closed gracefully after answering its confirmation", state.LastAction);
+    }
+
+    [Fact]
+    public async Task Quit_leaves_an_app_that_will_not_close_running_instead_of_killing_it()
+    {
+        // The app may still be flushing state; terminating it is what the user asked us to stop doing.
         var harness = new Harness();
         await harness.Manager.StartAsync();
         harness.Process.ExitOnWait = false;
 
         var state = await harness.Manager.QuitAsync();
 
+        Assert.Equal(0, harness.Process.KillCount);
+        Assert.Equal(AppStatus.Running, state.Status);
+        Assert.Contains("did not exit after the close request", state.LastAction);
+        Assert.Contains(harness.Log.Warnings, warning => warning.Contains("force quit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Quit_reports_a_confirmation_it_could_not_answer()
+    {
+        var harness = new Harness();
+        await harness.Manager.StartAsync();
+        harness.Process.ExitOnWait = false;
+        harness.Confirmation.Result = CloseConfirmation.CouldNotAnswer;
+
+        var state = await harness.Manager.QuitAsync();
+
+        Assert.Equal(0, harness.Process.KillCount);
+        Assert.Equal(AppStatus.Running, state.Status);
+        Assert.Contains("waiting for confirmation", state.LastAction);
+    }
+
+    [Fact]
+    public async Task Force_quit_terminates_the_process_tree()
+    {
+        var harness = new Harness();
+        await harness.Manager.StartAsync();
+        harness.Process.ExitOnWait = false;
+
+        var state = await harness.Manager.QuitAsync(force: true);
+
         Assert.Equal(1, harness.Process.KillCount);
         Assert.Equal(AppStatus.Stopped, state.Status);
         Assert.Contains("Terminated", state.LastAction);
+    }
+
+    [Fact]
+    public async Task Restart_never_terminates_an_app_that_will_not_close()
+    {
+        var harness = new Harness();
+        await harness.Manager.StartAsync();
+        harness.Process.ExitOnWait = false;
+
+        var state = await harness.Manager.RestartAsync();
+
+        Assert.Equal(0, harness.Process.KillCount);
+        Assert.Equal(1, harness.Process.StartCount);
+        // Status stays factual (the process is alive); the refusal is in LastError.
+        Assert.Equal(AppStatus.Running, state.Status);
+        Assert.Contains("Force Quit", state.LastError);
     }
 
     [Fact]
@@ -233,7 +296,8 @@ public sealed class AppManagerTests
             AppInstallation? installation = null,
             bool installed = true,
             ICredentialProvider[]? providers = null,
-            ILoginDriver? driver = null)
+            ILoginDriver? driver = null,
+            ICloseConfirmationPrompt? confirmation = null)
         {
             Installation = installed ? installation ?? TestProfile.Installation : null;
             Clock = new FakeClock();
@@ -241,6 +305,7 @@ public sealed class AppManagerTests
             Driver = driver as FakeLoginDriver ?? new FakeLoginDriver();
             Resolver = new CredentialResolver(providers ?? []);
             Log = new RecordingLog();
+            Confirmation = confirmation as FakeCloseConfirmationPrompt ?? new FakeCloseConfirmationPrompt();
 
             Manager = new AppManager(
                 new FakeLocator(Installation),
@@ -249,7 +314,8 @@ public sealed class AppManagerTests
                 driver ?? Driver,
                 TestProfile.Fast,
                 Clock,
-                Log);
+                Log,
+                closeConfirmation: Confirmation);
         }
 
         public AppInstallation? Installation { get; }
@@ -263,6 +329,8 @@ public sealed class AppManagerTests
         public CredentialResolver Resolver { get; }
 
         public RecordingLog Log { get; }
+
+        public FakeCloseConfirmationPrompt Confirmation { get; }
 
         public AppManager Manager { get; }
     }

@@ -20,6 +20,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         StartCommand = new AsyncRelayCommand(() => RunAsync(ct => _manager.StartAsync(ct)), () => CanStart);
         AutoLoginCommand = new AsyncRelayCommand(() => RunAsync(ct => _manager.AutoLoginAsync(ct)), () => CanAutoLogin);
         QuitCommand = new AsyncRelayCommand(() => RunAsync(ct => _manager.QuitAsync(force: false, ct)), () => CanQuit);
+        ForceQuitCommand = new AsyncRelayCommand(
+            () => RunAsync(ct => _manager.QuitAsync(force: true, ct)),
+            () => CanQuit);
         RestartCommand = new AsyncRelayCommand(() => RunAsync(ct => _manager.RestartAsync(ct)), () => CanRestart);
         OpenLogsCommand = new RelayCommand(() => _runtime.OpenInFileExplorer(_runtime.LogDirectory));
         OpenCredentialsCommand = new RelayCommand(() => CredentialsRequested?.Invoke(this, EventArgs.Empty));
@@ -112,6 +115,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand AutoLoginCommand { get; }
 
     public AsyncRelayCommand QuitCommand { get; }
+
+    /// <summary>Terminates the process tree — the explicit way out when the app will not close.</summary>
+    public AsyncRelayCommand ForceQuitCommand { get; }
 
     public AsyncRelayCommand RestartCommand { get; }
 
@@ -213,6 +219,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         StartCommand.RaiseCanExecuteChanged();
         AutoLoginCommand.RaiseCanExecuteChanged();
         QuitCommand.RaiseCanExecuteChanged();
+        ForceQuitCommand.RaiseCanExecuteChanged();
         RestartCommand.RaiseCanExecuteChanged();
     }
 

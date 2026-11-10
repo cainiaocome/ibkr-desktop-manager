@@ -42,6 +42,12 @@ public sealed record AppProfile
 
     public IReadOnlyList<string> LoggedInAutomationIdPatterns { get; init; } = [];
 
+    /// <summary>
+    /// Buttons that confirm "yes, close" in the dialog IBKR Desktop shows when a close request reaches
+    /// a running session. Only ever pressed inside a dialog window, never in the main window.
+    /// </summary>
+    public IReadOnlyList<string> QuitConfirmationButtonNames { get; init; } = ["Yes", "Quit", "Exit", "Confirm", "OK"];
+
     public TimeSpan LaunchTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
     public TimeSpan LoginWindowTimeout { get; init; } = TimeSpan.FromMinutes(2);
@@ -124,6 +130,8 @@ public sealed record AppProfile
                 LoggedInWindowTitlePatterns = dto.LoggedInWindowTitlePatterns ?? [],
                 LoginAutomationIdPatterns = dto.LoginAutomationIdPatterns ?? [],
                 LoginButtonNames = dto.LoginButtonNames ?? [],
+                QuitConfirmationButtonNames = dto.QuitConfirmationButtonNames ??
+                                              ["Yes", "Quit", "Exit", "Confirm", "OK"],
                 TwoFactorAutomationIdPatterns = dto.TwoFactorAutomationIdPatterns ?? [],
                 LoggedInAutomationIdPatterns = dto.LoggedInAutomationIdPatterns ?? [],
                 LaunchTimeout = TimeSpan.FromSeconds(dto.LaunchTimeoutSeconds ?? 120),
@@ -196,6 +204,8 @@ public sealed record AppProfile
         public string[]? LoginAutomationIdPatterns { get; init; }
 
         public string[]? LoginButtonNames { get; init; }
+
+        public string[]? QuitConfirmationButtonNames { get; init; }
 
         public string[]? TwoFactorAutomationIdPatterns { get; init; }
 

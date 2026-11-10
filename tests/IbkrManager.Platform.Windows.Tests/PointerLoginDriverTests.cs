@@ -646,6 +646,8 @@ public sealed class PointerLoginDriverTests
 
         public FakeUi? Ui { get; set; }
 
+        public bool Click(IntPtr window, int x, int y) => Click(x, y);
+
         public bool Click(int x, int y)
         {
             if (Reject)

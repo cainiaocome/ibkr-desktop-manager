@@ -14,6 +14,12 @@ public interface IPostedInput
     /// <summary>Posts a left click at a screen position relative to the app's main window.</summary>
     bool Click(int screenX, int screenY);
 
+    /// <summary>
+    /// Posts a left click to a specific window of the app. Needed for dialogs, which are separate
+    /// windows and do not receive the main window's messages.
+    /// </summary>
+    bool Click(IntPtr window, int screenX, int screenY);
+
     /// <summary>Posts one character to the focused control.</summary>
     bool Text(char character);
 
