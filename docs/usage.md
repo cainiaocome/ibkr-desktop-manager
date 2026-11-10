@@ -124,6 +124,7 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | Auto Login reports "login window is still showing" | Wrong credentials, extra dialog on screen, or the app changed its login form → try `manual` |
 | "the app did not receive the typed username" | Another window took focus, a UAC prompt is in front, or the app is elevated while the manager is not. Click into the IBKR window and retry, or run both at the same privilege level |
 | Status stays "Starting…" | The app may be showing a splash window; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
+| The machine did not shut down and is unreachable | If the manager was running an older build (≤ 0.1.4) its window could be busy inspecting the app when Windows asked it to close, which parks the shutdown on a screen that needs console input. 0.2.1 answers session-end immediately and never blocks its message loop. For headless machines use `shutdown /s /f /t 0` so unresponsive apps are terminated instead of waited for |
 | IBKR Desktop becomes unresponsive after logging in | Fixed in 0.1.4: the manager no longer traverses the logged-in window's accessibility tree every couple of seconds. Update, or run the app without the manager to confirm the app itself is healthy |
 | App shows "Error: Hardware not supported" | IBKR Desktop needs a supported GPU; the manager still starts/quits it, and UIA may still work |
 | Auto Login types into the wrong field | Tab order changed; use `manual` and report it with the log |

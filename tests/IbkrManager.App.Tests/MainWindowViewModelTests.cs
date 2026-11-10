@@ -140,6 +140,32 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task Refresh_never_runs_the_manager_on_the_ui_thread()
+    {
+        // A blocked message pump is what makes Windows report the app as "not responding", which is
+        // what stalls a shutdown. Every manager call is dispatched to the thread pool.
+        var harness = new Harness(States.Stopped);
+        await harness.ViewModel.InitializeAsync();
+        harness.Manager.TickThreadPool.Clear();
+
+        await harness.ViewModel.RefreshAsync();
+
+        Assert.Equal([true], harness.Manager.TickThreadPool);
+    }
+
+    [Fact]
+    public async Task A_shutdown_stops_further_refreshes()
+    {
+        var harness = new Harness(States.Running);
+        await harness.ViewModel.InitializeAsync();
+        harness.ViewModel.PrepareForShutdown();
+
+        await harness.ViewModel.RefreshAsync();
+
+        Assert.Equal(0, harness.Manager.TickCalls);
+    }
+
+    [Fact]
     public async Task Open_credentials_raises_the_dialog_request()
     {
         var harness = new Harness(States.Stopped);

@@ -121,14 +121,41 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public RelayCommand OpenSettingsCommand { get; }
 
+    /// <summary>
+    /// Cancelled when Windows ends the session, so an in-flight command stops instead of holding the
+    /// shutdown open.
+    /// </summary>
+    private readonly CancellationTokenSource _shutdown = new();
+
+    /// <summary>Stops background work; called from the session-end hook.</summary>
+    public void PrepareForShutdown()
+    {
+        try
+        {
+            _shutdown.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // already gone
+        }
+    }
+
     public async Task InitializeAsync()
     {
-        Apply(await _manager.InitializeAsync().ConfigureAwait(true));
+        Apply(await Task.Run(() => _manager.InitializeAsync()).ConfigureAwait(true));
     }
 
     public async Task RefreshAsync()
     {
-        Apply(await _manager.TickAsync().ConfigureAwait(true));
+        if (_shutdown.IsCancellationRequested)
+        {
+            return;
+        }
+
+        // Always off the UI thread: the window must keep pumping messages so Windows never sees it as
+        // "not responding" — that is what stalls a shutdown.
+        var state = await Task.Run(() => _manager.TickAsync(_shutdown.Token)).ConfigureAwait(true);
+        Apply(state);
     }
 
     private async Task RunAsync(Func<CancellationToken, Task<AppState>> action)
@@ -137,7 +164,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         SetBusy(true);
         try
         {
-            Apply(await action(CancellationToken.None).ConfigureAwait(true));
+            Apply(await Task.Run(() => action(_shutdown.Token)).ConfigureAwait(true));
+        }
+        catch (OperationCanceledException)
+        {
+            _transientError = "Cancelled because Windows is shutting down";
         }
         catch (Exception ex)
         {

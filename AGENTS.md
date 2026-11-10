@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 156 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 158 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -91,6 +91,10 @@ Facts learned the hard way (do not regress them):
   brings it back with a **QML dialog titled "Login failed"** whose text is *not* exposed through UI
   Automation — only its `OK` button is. Detecting the button is the reliable verdict; the wording is
   only visible in screenshots (`TestResults/e2e/e2e-verdict-screen.png`).
+- Never run manager work on the Avalonia UI thread (`Task.Run` it): a blocked message pump makes
+  Windows mark the window "not responding", and a shutdown then stalls on a screen that needs someone
+  at the console. `ShutdownHook` answers `WM_QUERYENDSESSION` and must stay the first thing that
+  happens for that message; test the hook by hand on Windows (it cannot run on Linux CI).
 - The manager is stateless about the app's UI on purpose: status comes from the process, and the only
   UI inspection happens inside an Auto Login click. Do not reintroduce a live login/2FA/logged-in state
   machine — that is what made the real app unresponsive in 0.1.3.

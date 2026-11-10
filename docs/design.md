@@ -175,6 +175,23 @@ the user can finish manually. Never retry-loop credentials (lockout risk).
 
 ---
 
+### Shutdown behaviour
+
+The manager must never be the reason a machine cannot shut down. Windows' protocol is: send
+`WM_QUERYENDSESSION` to every top-level window, wait for each answer, and if an app does not answer in
+time mark it *not responding* and put up a screen that needs someone at the console to continue. On a
+headless remote machine that is a shutdown that never finishes.
+
+Therefore:
+
+- `ShutdownHook` subclasses the main window, answers `WM_QUERYENDSESSION` with **allow** before doing
+  anything else, and on `WM_ENDSESSION` stops the timer and cancels in-flight commands.
+- The Avalonia UI thread never runs manager work: ticks and commands are dispatched with `Task.Run`,
+  so the message pump is free even if a Win32 call or an accessibility query hangs.
+- The kill-on-close Job Object means the app dies with the manager, so a hung IBKR Desktop cannot hold
+  the session open either.
+- Logging flushes every line, so a forced termination still leaves the last actions on disk.
+
 ## 6. GUI
 
 Single 480×360 window, shown on launch (window-first, no start-minimized mode).
@@ -329,7 +346,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.2.0)
+## 11. Implementation status (v0.2.1)
 
 What shipped, and where it lives:
 
@@ -344,7 +361,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 156 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 158 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

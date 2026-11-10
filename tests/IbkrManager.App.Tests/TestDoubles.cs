@@ -23,6 +23,9 @@ internal sealed class FakeAppManager : IAppManager
 
     public int TickCalls { get; private set; }
 
+    /// <summary>Whether each TickAsync ran on a thread-pool thread (i.e. off the UI thread).</summary>
+    public List<bool> TickThreadPool { get; } = [];
+
     public event EventHandler<AppState>? StateChanged;
 
     public Task<AppState> InitializeAsync(CancellationToken cancellationToken = default) => Task.FromResult(State);
@@ -30,6 +33,7 @@ internal sealed class FakeAppManager : IAppManager
     public Task<AppState> TickAsync(CancellationToken cancellationToken = default)
     {
         TickCalls++;
+        TickThreadPool.Add(Thread.CurrentThread.IsThreadPoolThread);
         return Task.FromResult(State);
     }
 

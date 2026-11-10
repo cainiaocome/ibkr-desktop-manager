@@ -4,12 +4,14 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using IbkrManager.App.ViewModels;
+using IbkrManager.Platform.Windows;
 
 namespace IbkrManager.App.Views;
 
 public partial class MainWindow : Window
 {
     private readonly DispatcherTimer _timer;
+    private ShutdownHook? _shutdownHook;
 
     public MainWindow()
     {
@@ -38,6 +40,20 @@ public partial class MainWindow : Window
         viewModel.CredentialsRequested += OnCredentialsRequested;
         viewModel.SettingsRequested += OnSettingsRequested;
 
+        // Answer Windows' session-end messages immediately, and stop our work if the session ends.
+        if (OperatingSystem.IsWindows() && TryGetPlatformHandle()?.Handle is { } handle && handle != IntPtr.Zero)
+        {
+            _shutdownHook = ShutdownHook.TryInstall(handle, viewModel.Runtime.Log);
+            if (_shutdownHook is not null)
+            {
+                _shutdownHook.SessionEnded += (_, _) =>
+                {
+                    _timer.Stop();
+                    viewModel.PrepareForShutdown();
+                };
+            }
+        }
+
         await viewModel.InitializeAsync();
         _timer.Start();
     }
@@ -45,6 +61,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _timer.Stop();
+        _shutdownHook?.Dispose();
         base.OnClosed(e);
     }
 
