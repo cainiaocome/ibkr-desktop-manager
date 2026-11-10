@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 158 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 163 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -95,6 +95,11 @@ Facts learned the hard way (do not regress them):
   Windows mark the window "not responding", and a shutdown then stalls on a screen that needs someone
   at the console. `ShutdownHook` answers `WM_QUERYENDSESSION` and must stay the first thing that
   happens for that message; test the hook by hand on Windows (it cannot run on Linux CI).
+- `Quit` must never call `KillAsync` — it posts `WM_CLOSE`, answers the app's own confirmation
+  (`UiCloseConfirmation`, buttons only inside a *non-main* window) and reports when the app stays open.
+  `Force Quit` is the only destructive path, and `Restart` refuses instead of killing. At the login
+  screen the real app exits on `WM_CLOSE` in ~1.5 s with no dialog (measured in CI); the confirmation
+  is a logged-in-session behaviour that cannot be reproduced without an account.
 - The manager is stateless about the app's UI on purpose: status comes from the process, and the only
   UI inspection happens inside an Auto Login click. Do not reintroduce a live login/2FA/logged-in state
   machine — that is what made the real app unresponsive in 0.1.3.

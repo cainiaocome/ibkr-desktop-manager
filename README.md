@@ -103,7 +103,7 @@ started (that is the kill-on-close job object doing its job).
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 158 tests: core, platform, view models, headless UI render, Windows integration
+dotnet test                        # 163 tests: core, platform, view models, headless UI render, Windows integration
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App
 ```

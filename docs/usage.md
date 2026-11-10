@@ -96,8 +96,14 @@ Set the login driver to `manual` to make Auto Login report "disabled in Settings
 
 ## 4. Quit, restart and closing the manager
 
-- **Quit** posts `WM_CLOSE`, waits 15 seconds, then terminates the process tree.
-- **Restart** = Quit + Start.
+- **Quit** asks the app to close (`WM_CLOSE`) and waits. If IBKR Desktop puts up its own confirmation —
+  it does so on a running session, not at the login screen — the manager reads the dialog, presses its
+  confirming button and waits again, so the app gets to log out and flush its state. Quit **never
+  terminates the process** on its own. If the app stays open, the manager says so and leaves it alone.
+- **Force Quit** terminates the process tree immediately. Use it when the app will not close, or when
+  you do not care about its cleanup. Nothing else in the manager kills the app.
+- **Restart** = Quit + Start. Because Quit never kills, a Restart is refused (with an explanation)
+  while the app would not close; Force Quit and then Start instead.
 - Closing the manager window stops the IBKR Desktop instance the manager started. This is deliberate:
   the app is assigned to a kill-on-close job object so a trading session cannot be left orphaned.
   If you want the app to outlive the manager, start it yourself — the manager will then attach to it

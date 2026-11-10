@@ -4,6 +4,23 @@ The manager's behaviour is driven by `src/IbkrManager.Core/app-profile.json`. Ev
 observed by installing the real app on a Windows runner — see the `IBKR Desktop probe` workflow and
 `scripts/probe-ibkr.ps1`.
 
+## Closing the app (`RealCloseProbeTests`)
+
+Measured on `latest (4.0d) 20261028` at the login screen:
+
+| Step | Result |
+|---|---|
+| `PostMessage(mainWindow, WM_CLOSE)` | the process exits in ~1.5 s, **no dialog**, one window (`Qt683QWindowIcon`, title `IBKR Desktop`) |
+| `AppManager.QuitAsync()` | reports `Stopped` / "Closed gracefully" — nothing was terminated |
+
+So a close request is enough at the login screen, and the confirmation users see when clicking the X
+belongs to a **logged-in** session (a logout prompt). That dialog cannot be reproduced here (no
+account): the manager looks for a button named `Yes`/`Quit`/`Exit`/`Confirm`/`OK`
+(`quitConfirmationButtonNames`) **inside a window that is not the main window** — IBKR's QML dialogs
+have their own top-level window (the login-failure dialog proved it) — clicks it with `SendInput`
+(verified, then posted messages as the fallback) and never presses anything in the trading window.
+If the dialog cannot be operated the manager reports it and leaves the app running.
+
 ## Verified facts
 
 | Item | Value |

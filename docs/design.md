@@ -167,8 +167,13 @@ runs inside the app's UI thread and gave the real app a measurable slow-down (se
   deeply. Nothing inspects the app between clicks.
 5. **Stop at 2FA**: never attempt to solve it. Report "awaiting 2FA" in the outcome of the click; the
    manager does not monitor the app afterwards.
-6. **Quit**: post `WM_CLOSE` to the main window → wait 15 s → `Kill(entireProcessTree: true)`.
-   Log which path was taken.
+6. **Quit** (`ICloseConfirmationPrompt`): post `WM_CLOSE` → wait `GracefulShutdownTimeout`; if the app
+   is still there, look for its "really quit?" dialog and press the confirming button (a window-targeted
+   click, then wait again). **Never** escalate to `TerminateProcess` — the app may still be flushing
+   state, and killing a logged-in session is exactly what the user asked us to stop doing. Staying open
+   is reported as such; `Force Quit` is the explicit termination, and `Restart` refuses rather than
+   kill. Measured on the real app: at the login screen `WM_CLOSE` exits in ~1.5 s with no dialog, so the
+   confirmation path only runs on a logged-in session (not reproducible in CI without an account).
 
 Failure policy: any injection step fails → log the reason, show an error banner, leave the app alone so
 the user can finish manually. Never retry-loop credentials (lockout risk).
@@ -204,7 +209,7 @@ IBKR Desktop Manager                                   [–][□][×]
   Credentials       Username ✓   Password ✓   (env)   [ Set up… ]
   Login state       ● Awaiting 2FA — finish in the app window
 ──────────────────────────────────────────────────────────────
-  [ Start ]  [ Auto Login ]  [ Quit ]  [ Restart ]   [ Logs ] [ ⚙ ]
+  [ Start ] [ Auto Login ] [ Quit ] [ Force Quit ] [ Restart ]   [ Logs ] [ ⚙ ]
 ──────────────────────────────────────────────────────────────
   ⚠ Auto Login blocked: IBKR_PASSWORD is not set
   last: autologin typed username, waiting for password field
@@ -216,7 +221,10 @@ IBKR Desktop Manager                                   [–][□][×]
 - `[ Set up… ]` on the credentials row opens the dialog in §7.1 (add / replace / clear / test presence).
 - Rows use green/amber/red dots; credentials row shows presence + source (`env`), never
   masked values (a mask still leaks length).
-- `Start`/`Auto Login` disabled unless the app is installed; `Quit`/`Restart` disabled when stopped.
+- `Start`/`Auto Login` disabled unless the app is installed; `Quit`, `Force Quit` and `Restart` are
+  disabled when stopped.
+- `Quit` is graceful by design and may end with the app still running (if it refuses to close);
+  `Force Quit` is the destructive one and says so in its tooltip.
 - Window-first; there is no tray icon in v0.1.0 (the window is the app), and closing the window
   exits the app — no close-to-tray surprise.
 - Settings: exe path override, env var names, login driver, timeouts, start-with-Windows.
@@ -346,7 +354,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.2.1)
+## 11. Implementation status (v0.3.0)
 
 What shipped, and where it lives:
 
@@ -361,7 +369,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 158 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 163 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,
