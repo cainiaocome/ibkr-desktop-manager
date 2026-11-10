@@ -134,7 +134,7 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
     }
 
     [Fact]
-    public async Task Quit_kills_the_process_tree_when_the_app_ignores_wm_close()
+    public async Task Quit_leaves_an_app_that_ignores_wm_close_running_and_force_quit_kills_it()
     {
         if (!WindowsRequired())
         {
@@ -153,13 +153,24 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             var childPid = payload.GetProperty("childPid").GetInt32();
             Assert.True(IsAlive(childPid), "the stub should have spawned a child process");
 
-            var stopped = await harness.Manager.QuitAsync();
+            // Quit is graceful and never terminates: the stub refuses to close, so it must survive and
+            // the manager must say so.
+            var quit = await harness.Manager.QuitAsync();
 
             var closeNote = ReadCloseNote(harness.OutputPath);
+            Assert.Equal(AppStatus.Running, quit.Status);
+            Assert.True(quit.LastAction!.Contains("did not exit after the close request", StringComparison.OrdinalIgnoreCase),
+                $"expected an honest 'still running' report, got '{quit.LastAction}'; stub close note: {closeNote}; log:\n" +
+                string.Join(Environment.NewLine, harness.Log.Messages));
+            Assert.True(IsAlive(started.ProcessId!.Value), "Quit must not terminate the app");
+            Assert.True(IsAlive(childPid), "Quit must not touch the child process");
+
+            // Force Quit is the explicit termination, and it takes the whole tree down.
+            var stopped = await harness.Manager.QuitAsync(force: true);
+
             Assert.Equal(AppStatus.Stopped, stopped.Status);
             Assert.True(stopped.LastAction!.Contains("Terminated", StringComparison.OrdinalIgnoreCase),
-                $"expected a kill, got '{stopped.LastAction}'; stub close note: {closeNote}; log:\n" +
-                string.Join(Environment.NewLine, harness.Log.Messages));
+                $"expected a kill, got '{stopped.LastAction}'");
             Assert.False(IsAlive(started.ProcessId!.Value));
             TestHostFixture.WaitUntil(() => !IsAlive(childPid), TimeSpan.FromSeconds(10));
             Assert.False(IsAlive(childPid), "the child process should have been killed with the tree");
