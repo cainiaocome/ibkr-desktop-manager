@@ -65,13 +65,21 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
             return;
         }
 
+        if (!InteractiveSession.IsInteractive())
+        {
+            // The stub only takes typed input through real keystrokes; service sessions discard them.
+            output.WriteLine("SKIPPED: typing needs an interactive desktop ({0}).", InteractiveSession.Describe());
+            return;
+        }
+
         var harness = fixture.CreateHarness(
             accounts:
             [
                 ("Main", "main-user", "main-password"),
                 ("Paper", "paper-user", "paper-password"),
             ],
-            selectAlias: "Paper");
+            selectAlias: "Paper",
+            pointerDriverForManager: true);
         try
         {
             await harness.Manager.InitializeAsync();

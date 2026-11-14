@@ -65,7 +65,8 @@ public sealed class TestHostFixture : IDisposable
         bool ignoreClose = false,
         bool spawnChild = false,
         IReadOnlyList<(string Alias, string Username, string Password)>? accounts = null,
-        string? selectAlias = null)
+        string? selectAlias = null,
+        bool pointerDriverForManager = false)
     {
         var output = Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Guid.NewGuid().ToString("N") + ".json");
         _outputFiles.Add(output);
@@ -106,9 +107,19 @@ public sealed class TestHostFixture : IDisposable
             }
         }
 
-        var driver = new SendInputLoginDriver(process, SystemClock.Instance, log);
         var uia = new UiaSession(process, Profile, log);
         var pointer = new PointerLoginDriver(uia, process, log);
+        // The production driver needs an interactive desktop (real clicks and keystrokes); the blind
+        // SendInput driver is the default here because the stub answers Tab/Enter without geometry.
+        ILoginDriver driver = pointerDriverForManager
+            ? new PointerLoginDriver(
+                uia,
+                process,
+                log,
+                postedInput: new PostedWindowInput(process),
+                inspector: uia,
+                isInteractive: InteractiveSession.IsInteractive)
+            : new SendInputLoginDriver(process, SystemClock.Instance, log);
         var locator = new OverridingAppLocator(
             new WindowsAppLocator(Profile, new UninstallRegistry()),
             () => HostPath);
