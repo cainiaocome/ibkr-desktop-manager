@@ -19,7 +19,8 @@ account): the manager looks for a button named `Yes`/`Quit`/`Exit`/`Confirm`/`OK
 (`quitConfirmationButtonNames`) **inside a window that is not the main window** — IBKR's QML dialogs
 have their own top-level window (the login-failure dialog proved it) — clicks it with `SendInput`
 (verified, then posted messages as the fallback) and never presses anything in the trading window.
-If the dialog cannot be operated the manager reports it and leaves the app running.
+If the dialog cannot be operated the manager reports it and leaves the app running. Only a window that
+appeared after the close request is considered, and the main window is never a target.
 
 ## Verified facts
 

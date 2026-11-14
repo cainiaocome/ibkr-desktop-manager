@@ -42,7 +42,9 @@ public sealed class UiCloseConfirmation : ICloseConfirmationPrompt
         _isInteractive = isInteractive ?? InteractiveSession.IsInteractive;
     }
 
-    public Task<CloseConfirmation> AnswerAsync(CancellationToken cancellationToken = default)
+    public Task<CloseConfirmation> AnswerAsync(
+        CloseConfirmationRequest request,
+        CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsWindows() || !_process.IsRunning || _process.ProcessId is not { } processId)
         {
@@ -52,7 +54,7 @@ public sealed class UiCloseConfirmation : ICloseConfirmationPrompt
         Candidate? candidate;
         try
         {
-            candidate = OnSta(() => FindCandidate(processId));
+            candidate = OnSta(() => FindCandidate(processId, request));
         }
         catch (Exception ex) when (ex is COMException or TimeoutException or ArgumentException)
         {
@@ -76,6 +78,8 @@ public sealed class UiCloseConfirmation : ICloseConfirmationPrompt
         // Same lesson as the login form: SendInput is silently dropped in a service session and across
         // an elevation boundary, so the click is only trusted once the dialog actually goes away.
         if (_isInteractive() &&
+            NativeMethods.SetForegroundWindow(candidate.Window) &&
+            NativeMethods.GetForegroundWindow() == candidate.Window &&
             _mouse.Click(candidate.Bounds.CenterX, candidate.Bounds.CenterY) &&
             WaitForDialogToClose(candidate.Window, TimeSpan.FromSeconds(2), cancellationToken))
         {
@@ -91,7 +95,9 @@ public sealed class UiCloseConfirmation : ICloseConfirmationPrompt
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (cancellationToken.IsCancellationRequested || !NativeMethods.IsWindow(window))
+            // A cancelled wait means "unknown", not "answered": never report a confirmation we did not see.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!NativeMethods.IsWindow(window))
             {
                 return true;
             }
@@ -104,42 +110,52 @@ public sealed class UiCloseConfirmation : ICloseConfirmationPrompt
 
     // ---------------------------------------------------------------- core (STA only)
 
-    private Candidate? FindCandidate(int processId)
+    private Candidate? FindCandidate(int processId, CloseConfirmationRequest request)
     {
-        var mainWindow = WindowLocator.FindMainWindow(processId);
+        // Only windows that appeared after the close request: anything already on screen belongs to the
+        // trading session and must not be touched.
+        var candidates = QuitConfirmationWindows.Select(
+            request.MainWindow,
+            request.WindowsBeforeRequest,
+            WindowLocator.FindVisibleWindows(processId));
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
         var automation = new CUIAutomation();
 
-        foreach (var window in WindowLocator.FindWindows(processId))
+        // A modal confirmation usually owns the foreground; try that one first.
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (candidates.Contains(foreground) && Inspect(automation, foreground) is { } focused)
         {
-            if (window == mainWindow)
-            {
-                // The trading window itself: never press anything in it.
-                continue;
-            }
+            return focused;
+        }
 
-            IUIAutomationElement root;
-            try
-            {
-                root = automation.ElementFromHandle(window);
-            }
-            catch (COMException)
-            {
-                continue;
-            }
-
-            if (root is null)
-            {
-                continue;
-            }
-
-            var button = FindConfirmButton(automation, root, window);
-            if (button is { } found)
+        foreach (var window in candidates)
+        {
+            if (window != foreground && Inspect(automation, window) is { } found)
             {
                 return found;
             }
         }
 
         return null;
+    }
+
+    private Candidate? Inspect(CUIAutomation automation, IntPtr window)
+    {
+        IUIAutomationElement root;
+        try
+        {
+            root = automation.ElementFromHandle(window);
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+
+        return root is null ? null : FindConfirmButton(automation, root, window);
     }
 
     private Candidate? FindConfirmButton(CUIAutomation automation, IUIAutomationElement root, IntPtr window)

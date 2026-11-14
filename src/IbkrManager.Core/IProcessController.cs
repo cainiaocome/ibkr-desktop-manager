@@ -16,6 +16,9 @@ public interface IProcessController
 
     bool HasVisibleWindow { get; }
 
+    /// <summary>Visible top-level windows of the app (used to spot a dialog that appeared later).</summary>
+    IReadOnlyList<IntPtr> FindWindows();
+
     Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default);
 
     bool TryFocusMainWindow();

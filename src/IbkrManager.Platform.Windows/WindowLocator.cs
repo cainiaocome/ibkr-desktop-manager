@@ -32,6 +32,26 @@ internal static class WindowLocator
         return best;
     }
 
+    /// <summary>Every visible top-level window of the process in enumeration (Z) order.</summary>
+    public static IReadOnlyList<IntPtr> FindVisibleWindows(int processId)
+    {
+        var windows = new List<IntPtr>();
+
+        NativeMethods.EnumWindows((window, _) =>
+        {
+            NativeMethods.GetWindowThreadProcessId(window, out var owner);
+            if (owner != (uint)processId || !NativeMethods.IsWindowVisible(window))
+            {
+                return true;
+            }
+
+            windows.Add(window);
+            return true;
+        }, IntPtr.Zero);
+
+        return windows;
+    }
+
     /// <summary>Every visible, titled top-level window of the process, largest first.</summary>
     public static IReadOnlyList<IntPtr> FindWindows(int processId)
     {

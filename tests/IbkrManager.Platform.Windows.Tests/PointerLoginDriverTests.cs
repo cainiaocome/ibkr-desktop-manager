@@ -734,6 +734,8 @@ public sealed class PointerLoginDriverTests
 
         public IntPtr? MainWindowHandle => (IntPtr)1234;
 
+        public IReadOnlyList<IntPtr> FindWindows() => [];
+
         public bool HasVisibleWindow => true;
 
         public Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default) =>

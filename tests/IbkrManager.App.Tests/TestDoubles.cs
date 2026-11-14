@@ -31,6 +31,9 @@ internal sealed class FakeAppManager : IAppManager
 
     public AccountEdit? LastAccountEdit { get; private set; }
 
+    /// <summary>State returned by account commands (lets a test simulate a failure).</summary>
+    public AppState? NextAccountResult { get; set; }
+
     /// <summary>The edit with the secrets revealed, captured while they are still alive.</summary>
     public AccountEditValues? LastEditValues { get; private set; }
 
@@ -92,6 +95,12 @@ internal sealed class FakeAppManager : IAppManager
             edit.Username?.Reveal(),
             edit.Password?.Reveal(),
             edit.Persist);
+
+        if (NextAccountResult is { } failed)
+        {
+            StateChanged?.Invoke(this, failed);
+            return Task.FromResult(failed);
+        }
         var id = edit.Id ?? "new-" + (State.Accounts.Count + 1);
         var others = State.Accounts.Where(account => account.Id != id).ToList();
         var previous = State.Accounts.FirstOrDefault(account => account.Id == id);

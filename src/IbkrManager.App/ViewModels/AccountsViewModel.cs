@@ -72,7 +72,7 @@ public sealed class AccountsViewModel : ViewModelBase
         {
             if (SetProperty(ref _selected, value))
             {
-                Load(value);
+                _ = LoadAsync(value);
             }
         }
     }
@@ -108,12 +108,18 @@ public sealed class AccountsViewModel : ViewModelBase
     public bool Remember
     {
         get => _remember;
-        set => SetProperty(ref _remember, value);
+        set
+        {
+            if (SetProperty(ref _remember, value))
+            {
+                OnPropertyChanged(nameof(RememberHint));
+            }
+        }
     }
 
     public string RememberHint => Remember
         ? "Saved in Windows Credential Manager (per Windows user, DPAPI)."
-        : "Kept in memory until the manager exits — Auto Login then needs it again.";
+        : "Values typed now stay in memory until the manager exits (a pair already stored is left alone).";
 
     public string DeleteLabel => _deleteArmed ? "Really delete?" : "Delete";
 
@@ -187,7 +193,7 @@ public sealed class AccountsViewModel : ViewModelBase
         RaiseCommandStates();
     }
 
-    private void Load(AccountRow? row)
+    private async Task LoadAsync(AccountRow? row)
     {
         if (row is null || row.Id == _accountId && row.Id == _selected?.Id)
         {
@@ -201,7 +207,8 @@ public sealed class AccountsViewModel : ViewModelBase
         ResolvedCredentials credentials;
         try
         {
-            credentials = _runtime.Accounts.Resolve(row.Id);
+            // Credential Manager work belongs off the UI thread, like every other manager call.
+            credentials = await Task.Run(() => _runtime.Accounts.Resolve(row.Id)).ConfigureAwait(true);
         }
         catch (AppManagerException ex)
         {
@@ -262,15 +269,26 @@ public sealed class AccountsViewModel : ViewModelBase
             using var username = usernameChanged && usernameTyped.Length > 0 ? new Secret(usernameTyped) : null;
             using var password = passwordTyped.Length > 0 ? new Secret(passwordTyped) : null;
 
-            var state = await _manager
-                .SaveAccountAsync(new AccountEdit(_accountId, alias, username, password, Remember))
+            var state = await Task.Run(() =>
+                    _manager.SaveAccountAsync(new AccountEdit(_accountId, alias, username, password, Remember)))
                 .ConfigureAwait(true);
 
-            _runtime.SettingsStore.Save(_runtime.SettingsStore.Load() with { PersistToCredentialManager = Remember });
+            if (state.LastError is { Length: > 0 } failure)
+            {
+                // AppManager records failures in LastError instead of throwing; without this the dialog
+                // behaved as if the save had worked (and cleared the password field).
+                Error = failure;
+                return;
+            }
+
+            await Task.Run(() =>
+                    _runtime.SettingsStore.Save(_runtime.SettingsStore.Load() with { PersistToCredentialManager = Remember }))
+                .ConfigureAwait(true);
+
             Password = string.Empty;
             Reload();
 
-            var saved = state.Accounts.FirstOrDefault(account => account.Alias == alias);
+            var saved = FindSaved(state, alias);
             if (saved is not null)
             {
                 _selected = Accounts.FirstOrDefault(row => row.Id == saved.Id);
@@ -316,7 +334,13 @@ public sealed class AccountsViewModel : ViewModelBase
         try
         {
             var deleted = _accountId;
-            await _manager.DeleteAccountAsync(deleted).ConfigureAwait(true);
+            var state = await Task.Run(() => _manager.DeleteAccountAsync(deleted)).ConfigureAwait(true);
+            if (state.LastError is { Length: > 0 } failure)
+            {
+                Error = failure;
+                return;
+            }
+
             _accountId = null;
             _deleteArmed = false;
             StartNew();
@@ -344,7 +368,13 @@ public sealed class AccountsViewModel : ViewModelBase
         SetBusy(true);
         try
         {
-            await _manager.SelectAccountAsync(_accountId).ConfigureAwait(true);
+            var state = await Task.Run(() => _manager.SelectAccountAsync(_accountId)).ConfigureAwait(true);
+            if (state.LastError is { Length: > 0 } failure)
+            {
+                Error = failure;
+                return;
+            }
+
             Reload();
         }
         catch (Exception ex)
@@ -356,6 +386,17 @@ public sealed class AccountsViewModel : ViewModelBase
         {
             SetBusy(false);
         }
+    }
+
+    /// <summary>
+    /// Finds the account the manager just saved. Matching by alias is the only link the state exposes,
+    /// so tolerate the service truncating a long name.
+    /// </summary>
+    private static AccountSummary? FindSaved(AppState state, string alias)
+    {
+        var candidates = new[] { alias, alias.Length > 40 ? alias[..40] : alias };
+        return state.Accounts.FirstOrDefault(account =>
+            candidates.Any(candidate => string.Equals(account.Alias, candidate, StringComparison.OrdinalIgnoreCase)));
     }
 
     private void SetBusy(bool busy)

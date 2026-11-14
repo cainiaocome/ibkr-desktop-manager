@@ -170,7 +170,10 @@ runs inside the app's UI thread and gave the real app a measurable slow-down (se
    manager does not monitor the app afterwards.
 6. **Quit** (`ICloseConfirmationPrompt`): post `WM_CLOSE` → wait `GracefulShutdownTimeout`; if the app
    is still there, look for its "really quit?" dialog and press the confirming button (a window-targeted
-   click, then wait again). **Never** escalate to `TerminateProcess` — the app may still be flushing
+   click, then wait again). A candidate must be a window that **did not exist when the close was
+   requested** and must not be the main window (`QuitConfirmationWindows`): an order ticket or an alert
+   that was already on screen is never touched, whatever its buttons are called. `SendInput` is only
+   used after the dialog owns the foreground; otherwise the posted click is used. **Never** escalate to `TerminateProcess` — the app may still be flushing
    state, and killing a logged-in session is exactly what the user asked us to stop doing. Staying open
    is reported as such; `Force Quit` is the explicit termination, and `Restart` refuses rather than
    kill. Measured on the real app: at the login screen `WM_CLOSE` exits in ~1.5 s with no dialog, so the
@@ -282,7 +285,13 @@ Selection rules, all in `AppSettings.Normalize()` / `AccountService`:
 - blank alias → `Account N`; duplicate ids dropped; duplicate aliases rejected on save
 - deleting the selected account selects the next one
 
-Migration (once, when the account list is empty): a pre-0.4 pair at
+`settings.json` holds this list, so a failed read must not become an empty write: `JsonSettingsStore`
+keeps a copy of an unreadable file (`settings.json.unreadable-<timestamp>`) before overwriting it, uses a
+unique temp file, and serialises saves. `AppManager` caches the summaries and the resolved pair per
+`IAccountService.Version`, so the 2 s tick does not decrypt the stored password every time.
+
+Migration (once — `legacyAccountsMigrated` records that it happened, so deleting every account does not
+bring it back): a pre-0.4 pair at
 `IbkrDesktopManager/username|password` is **copied** into a new account called *Default*, which is
 then selected. The legacy entries are left in place so a downgrade still finds them.
 
@@ -386,7 +395,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.4.0)
+## 11. Implementation status (v0.4.1)
 
 What shipped, and where it lives:
 
@@ -401,7 +410,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `AccountsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 169 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 181 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

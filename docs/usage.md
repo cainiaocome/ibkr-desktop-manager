@@ -40,8 +40,8 @@ Pick the account in the **Account** row of the main window; **Manage…** opens 
   recognise (*Main*, *Paper*, *Client A*).
 - **Use for Auto Login** marks the selected account as the one Auto Login uses. That choice is saved
   and is therefore also the account the manager starts with.
-- **Remember in Windows Credential Manager** (default on) — off keeps that pair in memory until the
-  manager exits, which is handy for a one-off login on a shared machine.
+- **Remember in Windows Credential Manager** (default on) — off keeps values you type in memory until
+  the manager exits. A pair that is already stored is left alone, so the next start falls back to it.
 - **Delete** asks once, then removes the account and its stored secret.
 - Passwords are never pre-filled; the username *is* shown in the editor (it identifies which account
   an alias means), and only when you have an account selected.
@@ -101,7 +101,9 @@ Set the login driver to `manual` to make Auto Login report "disabled in Settings
 
 - **Quit** asks the app to close (`WM_CLOSE`) and waits. If IBKR Desktop puts up its own confirmation —
   it does so on a running session, not at the login screen — the manager reads the dialog, presses its
-  confirming button and waits again, so the app gets to log out and flush its state. Quit **never
+  confirming button and waits again, so the app gets to log out and flush its state. Only a window that
+  appeared *after* the close request is considered — an order ticket or an alert that was already open
+  is never clicked. Quit **never
   terminates the process** on its own. If the app stays open, the manager says so and leaves it alone.
 - **Force Quit** terminates the process tree immediately. Use it when the app will not close, or when
   you do not care about its cleanup. Nothing else in the manager kills the app.

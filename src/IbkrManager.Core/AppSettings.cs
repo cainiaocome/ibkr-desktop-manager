@@ -13,6 +13,12 @@ public sealed record AppSettings
     /// <summary>The account Auto Login uses; also the default when the manager starts.</summary>
     public string? SelectedAccountId { get; init; }
 
+    /// <summary>
+    /// Set once the pre-0.4 single credential has been turned into an account. Without it, deleting
+    /// every account would make the legacy pair reappear as "Default" on the next start.
+    /// </summary>
+    public bool LegacyAccountsMigrated { get; init; }
+
     /// <summary>"auto" (clicks and types into the login window) or "manual" (never types).</summary>
     public string LoginDriver { get; init; } = "auto";
 

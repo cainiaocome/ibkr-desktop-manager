@@ -14,6 +14,13 @@ public enum CloseConfirmation
 }
 
 /// <summary>
+/// What the manager knows when it asks: the main window, and every window of the process that already
+/// existed before the close request. A confirmation can only be a window that is *not* in that list,
+/// which is what keeps a stray "OK"/"Confirm" in an old trading dialog from being pressed.
+/// </summary>
+public sealed record CloseConfirmationRequest(IntPtr MainWindow, IReadOnlyList<IntPtr> WindowsBeforeRequest);
+
+/// <summary>
 /// Answers the confirmation IBKR Desktop shows after a close request. Clicking the window's X raises
 /// the same question, so an automated Quit has to be able to answer it — otherwise the only way out is
 /// terminating the process, which skips the app's own cleanup.
@@ -24,7 +31,7 @@ public interface ICloseConfirmationPrompt
     /// Looks for a pending confirmation and answers it. Runs once, inside the Quit command, so it is
     /// quick and must not throw for a missing dialog.
     /// </summary>
-    Task<CloseConfirmation> AnswerAsync(CancellationToken cancellationToken = default);
+    Task<CloseConfirmation> AnswerAsync(CloseConfirmationRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Used on platforms (and in tests) where no confirmation can be answered.</summary>
@@ -32,6 +39,7 @@ public sealed class NullCloseConfirmationPrompt : ICloseConfirmationPrompt
 {
     public static readonly NullCloseConfirmationPrompt Instance = new();
 
-    public Task<CloseConfirmation> AnswerAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(CloseConfirmation.NotShown);
+    public Task<CloseConfirmation> AnswerAsync(
+        CloseConfirmationRequest request,
+        CancellationToken cancellationToken = default) => Task.FromResult(CloseConfirmation.NotShown);
 }

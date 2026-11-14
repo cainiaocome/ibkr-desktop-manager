@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 169 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 181 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -95,6 +95,12 @@ Facts learned the hard way (do not regress them):
   Windows mark the window "not responding", and a shutdown then stalls on a screen that needs someone
   at the console. `ShutdownHook` answers `WM_QUERYENDSESSION` and must stay the first thing that
   happens for that message; test the hook by hand on Windows (it cannot run on Linux CI).
+- A quit confirmation may only be answered in a window that appeared **after** the close request and is
+  not the main window (`QuitConfirmationWindows`). Pressing an "OK"/"Confirm" that was already on screen
+  could approve a trading action.
+- `settings.json` holds the account list: never write defaults over a file that failed to load
+  (`JsonSettingsStore` keeps a copy first), and `legacyAccountsMigrated` must stay true once set or a
+  deleted account reappears from the legacy credential.
 - `Quit` must never call `KillAsync` — it posts `WM_CLOSE`, answers the app's own confirmation
   (`UiCloseConfirmation`, buttons only inside a *non-main* window) and reports when the app stays open.
   `Force Quit` is the only destructive path, and `Restart` refuses instead of killing. At the login

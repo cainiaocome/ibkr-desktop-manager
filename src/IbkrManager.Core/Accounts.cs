@@ -32,6 +32,9 @@ public sealed record AccountEdit(
 /// <summary>Reads and writes the stored accounts. The selected one is what Auto Login uses.</summary>
 public interface IAccountService
 {
+    /// <summary>Bumped whenever the account list, a secret or the selection changes.</summary>
+    int Version { get; }
+
     IReadOnlyList<AccountSummary> List();
 
     string? SelectedId { get; }
@@ -81,6 +84,12 @@ public sealed class AccountService : IAccountService
         _redactor = redactor;
         Migrate();
     }
+
+    /// <summary>
+    /// Bumped on every change. The manager caches summaries/credentials per version so the 2 s tick
+    /// does not decrypt the stored password over and over.
+    /// </summary>
+    public int Version { get; private set; }
 
     public string? SelectedId
     {
@@ -194,15 +203,18 @@ public sealed class AccountService : IAccountService
 
         _settings.Save(settings);
 
-        var username = edit.Username is { IsEmpty: false } typedUsername ? typedUsername : null;
-        var password = edit.Password is { IsEmpty: false } typedPassword ? typedPassword : null;
+        // The half that was not retyped is kept, wherever it currently lives (this session, then the
+        // store). Reading only the store here used to delete a session-typed password.
+        var username = edit.Username is { IsEmpty: false } typedUsername
+            ? typedUsername
+            : Secret.From(Read(profile.Id, CredentialKind.Username));
+        var password = edit.Password is { IsEmpty: false } typedPassword
+            ? typedPassword
+            : Secret.From(Read(profile.Id, CredentialKind.Password));
 
         if (edit.Persist)
         {
-            // Keep the existing half when only one field was edited.
-            var storedUsername = username ?? Secret.From(_store.Read(profile.Id, CredentialKind.Username));
-            var storedPassword = password ?? Secret.From(_store.Read(profile.Id, CredentialKind.Password));
-            await _store.SaveAsync(profile.Id, storedUsername, storedPassword, cancellationToken).ConfigureAwait(false);
+            await _store.SaveAsync(profile.Id, username, password, cancellationToken).ConfigureAwait(false);
             await _session.ClearAsync(profile.Id, cancellationToken).ConfigureAwait(false);
             _log.Info($"Saved account '{alias}' in the credential store");
         }
@@ -211,6 +223,8 @@ public sealed class AccountService : IAccountService
             await _session.SaveAsync(profile.Id, username, password, cancellationToken).ConfigureAwait(false);
             _log.Info($"Account '{alias}' is kept in memory only (not remembered)");
         }
+
+        Version++;
 
         return List().First(account => account.Id == profile.Id);
     }
@@ -227,6 +241,7 @@ public sealed class AccountService : IAccountService
             : settings.SelectedAccountId;
 
         _settings.Save(settings with { Accounts = remaining, SelectedAccountId = selected });
+        Version++;
 
         await _store.ClearAsync(accountId, cancellationToken).ConfigureAwait(false);
         await _session.ClearAsync(accountId, cancellationToken).ConfigureAwait(false);
@@ -244,6 +259,7 @@ public sealed class AccountService : IAccountService
         if (settings.SelectedAccountId != accountId)
         {
             _settings.Save(settings with { SelectedAccountId = accountId });
+            Version++;
         }
     }
 
@@ -284,7 +300,7 @@ public sealed class AccountService : IAccountService
     private void Migrate()
     {
         var settings = _settings.Load();
-        if (settings.Accounts.Count > 0 || !_store.IsSupported)
+        if (settings.Accounts.Count > 0 || settings.LegacyAccountsMigrated || !_store.IsSupported)
         {
             return;
         }
@@ -299,7 +315,12 @@ public sealed class AccountService : IAccountService
 
         var profile = new AccountProfile { Id = NewId(), Alias = "Default" };
         _store.SaveAsync(profile.Id, Secret.From(username), Secret.From(password)).GetAwaiter().GetResult();
-        _settings.Save(settings with { Accounts = [profile], SelectedAccountId = profile.Id });
+        _settings.Save(settings with
+        {
+            Accounts = [profile],
+            SelectedAccountId = profile.Id,
+            LegacyAccountsMigrated = true,
+        });
         _log.Info("Migrated the existing stored credential to the account 'Default'");
 
         // The old entries are left in place on purpose: a downgrade to 0.3.x still finds them.

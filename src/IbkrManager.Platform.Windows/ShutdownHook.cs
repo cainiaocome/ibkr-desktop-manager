@@ -68,14 +68,15 @@ public sealed class ShutdownHook : IDisposable
             switch (message)
             {
                 case WmQueryEndSession:
-                    // Never delay a shutdown: the answer is "yes" before anything else happens.
-                    _log.Info("Windows is ending the session (shutdown or logoff); allowing it");
+                    // Never delay a shutdown: the answer is "yes" before anything else happens, and the
+                    // log line is queued because a file write can block on a lock or a slow disk.
+                    QueueLog("Windows is ending the session (shutdown or logoff); allowing it");
                     return 1;
 
                 case WmEndSession:
                     if (wParam != IntPtr.Zero)
                     {
-                        _log.Info("Session is ending; stopping manager work so shutdown is not delayed");
+                        QueueLog("Session is ending; stopping manager work so shutdown is not delayed");
                         SessionEnded?.Invoke(this, EventArgs.Empty);
                     }
 
@@ -96,6 +97,28 @@ public sealed class ShutdownHook : IDisposable
         }
 
         return CallWindowProc(_previous, window, message, wParam, lParam);
+    }
+
+    private void QueueLog(string message)
+    {
+        try
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    _log.Info(message);
+                }
+                catch (Exception)
+                {
+                    // nothing sensible left to do
+                }
+            });
+        }
+        catch (Exception)
+        {
+            // The answer to the shutdown query matters more than the log line.
+        }
     }
 
     public void Dispose()

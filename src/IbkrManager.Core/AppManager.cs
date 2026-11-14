@@ -26,6 +26,9 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     private bool _disposed;
     private bool _stopping;
     private LoginAttempt? _lastAttempt;
+    private int _accountsVersion = -1;
+    private IReadOnlyList<AccountSummary> _accountSummaries = [];
+    private ResolvedCredentials _resolved = ResolvedCredentials.Empty;
     private AppState _state = AppState.Initial;
 
     public AppManager(
@@ -223,6 +226,9 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     /// </summary>
     private async Task<CloseOutcome> TryCloseAsync(CancellationToken cancellationToken)
     {
+        // Snapshot first: a confirmation can only be a window that appears afterwards.
+        var mainWindow = _process.MainWindowHandle ?? IntPtr.Zero;
+        var windowsBefore = _process.FindWindows();
         var requested = await _process.CloseMainWindowAsync(cancellationToken).ConfigureAwait(false);
         if (!requested)
         {
@@ -235,7 +241,9 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         }
 
         // Still there: the app is most likely asking "really quit?".
-        var confirmation = await _closeConfirmation.AnswerAsync(cancellationToken).ConfigureAwait(false);
+        var confirmation = await _closeConfirmation
+            .AnswerAsync(new CloseConfirmationRequest(mainWindow, windowsBefore), cancellationToken)
+            .ConfigureAwait(false);
         if (confirmation == CloseConfirmation.Answered)
         {
             _log.Info("Answered IBKR Desktop's quit confirmation");
@@ -413,8 +421,8 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             ProcessId = _process.ProcessId,
             StartedAt = _process.StartedAt,
             LastAttempt = _lastAttempt,
-            Credentials = _accounts.Resolve(),
-            Accounts = _accounts.List(),
+            Credentials = CachedCredentials(),
+            Accounts = CachedAccounts(),
             SelectedAccountId = _accounts.SelectedId,
             LastError = _lastError,
             LastAction = _lastAction,
@@ -441,6 +449,35 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
         }
 
         return _stopping ? AppStatus.Stopping : AppStatus.Running;
+    }
+
+    /// <summary>
+    /// Account summaries and the resolved pair are cached per <see cref="IAccountService.Version"/>:
+    /// the 2 s tick only needs presence flags, and re-reading Credential Manager (which decrypts the
+    /// password) every two seconds helps nobody.
+    /// </summary>
+    private void RefreshAccountCache()
+    {
+        if (_accountsVersion == _accounts.Version)
+        {
+            return;
+        }
+
+        _accountsVersion = _accounts.Version;
+        _accountSummaries = _accounts.List();
+        _resolved = _accounts.Resolve();
+    }
+
+    private IReadOnlyList<AccountSummary> CachedAccounts()
+    {
+        RefreshAccountCache();
+        return _accountSummaries;
+    }
+
+    private ResolvedCredentials CachedCredentials()
+    {
+        RefreshAccountCache();
+        return _resolved;
     }
 
     private void Raise(AppState state)

@@ -158,6 +158,28 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         }
     }
 
+    public IReadOnlyList<IntPtr> FindWindows()
+    {
+        var process = Find();
+        if (process is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            return WindowLocator.FindVisibleWindows(process.Id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return [];
+        }
+        finally
+        {
+            Release(process);
+        }
+    }
+
     public Task<bool> CloseMainWindowAsync(CancellationToken cancellationToken = default)
     {
         var process = Find();

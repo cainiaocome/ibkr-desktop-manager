@@ -210,6 +210,8 @@ public sealed class SendInputLoginDriverTests
 
         public IntPtr? MainWindowHandle => null;
 
+        public IReadOnlyList<IntPtr> FindWindows() => [];
+
         public bool HasVisibleWindow { get; set; }
 
         public bool Focused { get; private set; }

@@ -42,6 +42,11 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
 
     public bool HasVisibleWindow { get; set; }
 
+    /// <summary>Windows the process has now; tests set this to simulate a dialog appearing.</summary>
+    public List<IntPtr> Windows { get; } = [];
+
+    public IReadOnlyList<IntPtr> FindWindows() => Windows;
+
     public int StartCount { get; private set; }
 
     public int FocusCount { get; private set; }
@@ -108,11 +113,16 @@ internal sealed class FakeCloseConfirmationPrompt : ICloseConfirmationPrompt
 
     public int CallCount { get; private set; }
 
-    public Task<CloseConfirmation> AnswerAsync(CancellationToken cancellationToken = default)
+    public Task<CloseConfirmation> AnswerAsync(
+        CloseConfirmationRequest request,
+        CancellationToken cancellationToken = default)
     {
         CallCount++;
+        LastRequest = request;
         return Task.FromResult(Result);
     }
+
+    public CloseConfirmationRequest? LastRequest { get; private set; }
 }
 
 internal sealed class FakeLoginDriver : ILoginDriver
@@ -150,8 +160,11 @@ internal sealed class InMemoryCredentialStore : ICredentialStore
 
     public bool IsSupported { get; set; } = true;
 
+    public int ReadCount { get; private set; }
+
     public string? Read(string accountId, CredentialKind kind)
     {
+        ReadCount++;
         if (!_values.TryGetValue(accountId, out var value))
         {
             return null;

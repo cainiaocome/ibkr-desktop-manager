@@ -15,13 +15,15 @@ public sealed class AccountsViewModelTests
     }
 
     [Fact]
-    public void Choosing_a_row_prefills_the_alias_and_username_but_never_the_password()
+    public async Task Choosing_a_row_prefills_the_alias_and_username_but_never_the_password()
     {
         var (viewModel, runtime) = Create(States.WithAccounts);
         Seed(runtime, "paper", "Paper", "paper-user", "paper-pass");
 
         viewModel.SelectedRow = viewModel.Accounts[1];
 
+        // Loading resolves the pair off the UI thread.
+        await WaitUntil(() => viewModel.Username == "paper-user");
         Assert.Equal("Paper", viewModel.Alias);
         Assert.Equal("paper-user", viewModel.Username);
         Assert.Equal(string.Empty, viewModel.Password);
@@ -69,6 +71,7 @@ public sealed class AccountsViewModelTests
         Seed(runtime, "main", "Main", "main-user", "main-pass");
 
         viewModel.SelectedRow = viewModel.Accounts[0];
+        await WaitUntil(() => viewModel.Username == "main-user");
         viewModel.Alias = "Primary";
         viewModel.Password = "new-pass";
 
@@ -106,6 +109,42 @@ public sealed class AccountsViewModelTests
         await viewModel.DeleteCommand.ExecuteAsync();
         Assert.Equal(1, _manager.DeleteAccountCalls);
         Assert.Single(viewModel.Accounts);
+    }
+
+    [Fact]
+    public void The_remember_hint_follows_the_checkbox()
+    {
+        var (viewModel, _) = Create(States.Stopped);
+
+        Assert.Contains("Credential Manager", viewModel.RememberHint);
+        viewModel.Remember = false;
+        Assert.Contains("memory", viewModel.RememberHint);
+    }
+
+    [Fact]
+    public async Task A_failed_save_is_reported_and_leaves_the_editor_alone()
+    {
+        var (viewModel, _) = Create(States.Stopped);
+        // AppManager records failures in LastError rather than throwing.
+        _manager.NextResult = States.Stopped with { LastError = "An account called 'Paper' already exists." };
+        viewModel.Alias = "Paper";
+        viewModel.Username = "paper-user";
+        viewModel.Password = "paper-pass";
+
+        await viewModel.SaveCommand.ExecuteAsync();
+
+        Assert.Contains("already exists", viewModel.Error);
+        // The typed password must survive a failed save.
+        Assert.Equal("paper-pass", viewModel.Password);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && !condition())
+        {
+            await Task.Delay(10);
+        }
     }
 
     private FakeAppManager _manager = new();

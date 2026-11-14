@@ -174,6 +174,54 @@ public sealed class AccountServiceTests
     }
 
     [Fact]
+    public async Task Remembering_a_session_only_account_keeps_both_halves()
+    {
+        // Regression: the missing half used to be read from the credential store only, so remembering a
+        // pair that lived in memory saved nothing and then cleared the session copy.
+        var service = CreateService();
+        var account = await service.SaveAsync(
+            new AccountEdit(null, "Client A", new Secret("client-user"), new Secret("client-pass"), Persist: false));
+
+        await service.SaveAsync(new AccountEdit(account.Id, "Client A", null, null, Persist: true));
+
+        var resolved = service.Resolve();
+        Assert.Equal("client-user", resolved.Username!.Reveal());
+        Assert.Equal("client-pass", resolved.Password!.Reveal());
+        Assert.Equal(CredentialSource.CredentialManager, resolved.PasswordSource);
+        Assert.Equal("client-user", _store.Read(account.Id, CredentialKind.Username));
+    }
+
+    [Fact]
+    public async Task Retyping_only_the_password_keeps_the_session_username()
+    {
+        var service = CreateService();
+        var account = await service.SaveAsync(
+            new AccountEdit(null, "Client A", new Secret("client-user"), new Secret("old-pass"), Persist: false));
+
+        await service.SaveAsync(new AccountEdit(account.Id, "Client A", null, new Secret("new-pass"), Persist: false));
+
+        var resolved = service.Resolve();
+        Assert.Equal("client-user", resolved.Username!.Reveal());
+        Assert.Equal("new-pass", resolved.Password!.Reveal());
+    }
+
+    [Fact]
+    public async Task Deleting_every_account_does_not_resurrect_the_legacy_pair()
+    {
+        _store.LegacyUsername = "legacy-user";
+        _store.LegacyPassword = "legacy-pass";
+        var service = CreateService();
+        var migrated = Assert.Single(service.List());
+
+        await service.DeleteAsync(migrated.Id);
+
+        Assert.Empty(service.List());
+        // A fresh instance (the next start) must not migrate again.
+        Assert.Empty(CreateService().List());
+        Assert.Null(CreateService().SelectedId);
+    }
+
+    [Fact]
     public void No_accounts_means_an_explicit_empty_resolution()
     {
         var service = CreateService();
