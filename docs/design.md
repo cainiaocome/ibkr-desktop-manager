@@ -280,6 +280,112 @@ Credentials
 - No prefill of the stored password, reveal toggle instead of clipboard, no "remember me" without
   an explicit checkbox, and the dialog is the only place a credential is ever rendered.
 
+### 7.2 Accounts (multiple credential profiles) — proposed, v0.4.0
+
+Today there is one implicit credential: a provider chain resolved into a single
+`ResolvedCredentials`. Multi-account means making "which credentials" an explicit, named choice.
+
+#### Data model
+
+```csharp
+public enum ProfileKind { Stored, Environment }
+
+public sealed record CredentialProfile           // lives in settings.json
+{
+    public string Id { get; init; }              // opaque, stable, never shown
+    public string Alias { get; init; }           // "Main", "Paper", "Client A"
+    public ProfileKind Kind { get; init; }
+    public string? UsernameVariable { get; init; }   // Environment only
+    public string? PasswordVariable { get; init; }   // Environment only
+}
+
+public sealed record AppSettings
+{
+    public IReadOnlyList<CredentialProfile> Profiles { get; init; } = [];
+    public string? SelectedProfileId { get; init; }   // the "default" at startup
+}
+```
+
+Two profile kinds, because both paths are already supported and used:
+
+| Kind | Where the pair lives | At rest |
+|---|---|---|
+| `Stored` | Credential Manager targets `IbkrDesktopManager/{id}/username` and `.../password` | DPAPI, per-user |
+| `Environment` | the two named env vars (per profile, defaulting to the settings names) | inherited / `HKCU\Environment` |
+
+**A profile is a source, not a preference.** Resolution stops being a cross-source merge: the
+username *and* password of a `Stored` profile both come from that profile's store entry, and both
+halves of an `Environment` profile come from its two variables. This removes today's ability to end up
+with a username from env and a password from Credential Manager — a wrong-account login waiting to
+happen.
+
+`ResolvedCredentials` gains `ProfileId`/`ProfileAlias` so state and logs can say *which* account was
+used. Aliases are safe to log; usernames and passwords are not, and stay behind `Secret`.
+
+#### Choosing an account
+
+- Main window gets an `Account` row: `[ Main ▾ ]  [ Manage… ]` next to the credential summary.
+- `IAppManager.SelectProfile(string profileId)` persists `SelectedProfileId` and rebuilds state. That
+  persisted selection **is** the startup default — one concept, not two. (`Set as default` as a
+  separate star would let the combo and the default disagree, and users then debug the wrong thing.)
+- `Auto Login` always uses the selected profile. Nothing is automatic: switching the combo never types
+  anything, never restarts the app and never touches a running session.
+- Selection rules: unknown/deleted id → first profile; no profiles at all → a seeded
+  `Environment` profile ("From environment") keeps the current env-var workflow working with zero
+  setup.
+- If the selected profile is incomplete, `Auto Login` fails with "Account Main has no password" — the
+  same hard failure as today, now naming the account.
+
+#### Migration (one time, on load)
+
+1. `settings.json` without `profiles` → seed `From environment` (Kind=Environment, configured variable
+   names) and select it.
+2. If legacy `IbkrDesktopManager/username|password` entries exist, also create `Stored` profile
+   "Default" from them and select **it** (migration must not change what Auto Login types).
+3. Legacy entries are copied, not moved, and cleared only when the user deletes that profile — so
+   downgrading to 0.3.x still finds them.
+4. `AppSettings.Normalize()` repairs dangling ids and blank aliases (alias defaults to `Account N`).
+
+#### GUI: "Manage accounts" replaces the credentials dialog
+
+```
+Accounts
+  ● Main       stored · username ✓ password ✓        [ Edit ] [ Delete ]
+  ○ Paper      environment · IBKR_PAPER_* · ✓ ✓      [ Edit ] [ Delete ]
+  ○ From environment  ✓ ✓                            [ Edit ] [ Delete ]
+  [+ Add account]
+──────────────────────────────────────────────────────────
+Edit "Main"
+  Alias     [ Main                    ]
+  Username  [ alice                   ]
+  Password  [ ••••••••• (stored) 👁 ]      only overwritten when edited
+  ☑ Remember in Windows Credential Manager
+  ☐ Also write as user environment variables   ⚠ plaintext in HKCU\Environment
+  [ Cancel ] [ Save ]
+```
+
+- Deletes need a confirmation; deleting the selected account selects the next one.
+- No password ever pre-filled; the reveal toggle stays the only way to see one.
+- `Test` resolves the pair and reports presence without revealing either half.
+
+#### What does not change
+
+- Single account **per running session**: one app, one login. Switching accounts does not restart or
+  re-login (that would need a live login state machine, which §"Status model" rules out). If you want
+  the other account, `Quit`, then `Auto Login`.
+- Profiles never enter argv, the app's environment, logs or telemetry.
+- `app-profile.json` is untouched: accounts are user data, not app behaviour.
+
+#### Tests
+
+- Core: resolution is per-profile (no cross-source mixing), selection persists, dangling id falls back,
+  migration from legacy single credential, incomplete profile names itself in the error.
+- Platform.Windows: per-profile Credential Manager targets, `ListProfileIds`, legacy read-through
+  (self-skipping off Windows).
+- App: combo binds to profiles, changing it persists and does not act, add/rename/delete flows.
+- Integration (stub host): two stored profiles, Auto Login types the *selected* username — the existing
+  stub records what was typed, so this is provable end-to-end without IBKR.
+
 ---
 
 ## 8. Repository layout
