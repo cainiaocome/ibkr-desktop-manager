@@ -54,6 +54,36 @@ public sealed class SettingsAndLogTests
     }
 
     [Fact]
+    public void A_03x_settings_file_still_loads()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "settings.json");
+            // The 0.3.x shape: environment-variable names and the "also write env" flag are gone.
+            File.WriteAllText(path, """
+                {
+                  "executablePathOverride": "D:\\IBKR\\ntws.exe",
+                  "usernameVariable": "MY_USER",
+                  "passwordVariable": "MY_PASS",
+                  "writeUserEnvironmentVariables": true,
+                  "loginDriver": "manual"
+                }
+                """);
+
+            var loaded = new JsonSettingsStore(path).Load();
+
+            Assert.Equal(@"D:\IBKR\ntws.exe", loaded.ExecutablePathOverride);
+            Assert.Equal("manual", loaded.LoginDriver);
+            Assert.Empty(loaded.Accounts);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void JsonSettingsStore_falls_back_to_defaults_for_corrupt_json()
     {
         var directory = CreateTempDirectory();

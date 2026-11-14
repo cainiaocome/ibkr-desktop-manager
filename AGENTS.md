@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 168 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 169 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \

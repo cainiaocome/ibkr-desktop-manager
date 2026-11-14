@@ -401,7 +401,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `AccountsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 168 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 169 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,
