@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:IbkrManager.App.ViewModels"
+        xmlns:core="using:IbkrManager.Core"
         x:Class="IbkrManager.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -25,8 +26,21 @@
         <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Foreground="#888888" />
         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding VersionText}" />
 
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="Credentials" Foreground="#888888" />
-        <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Account" Foreground="#888888" VerticalAlignment="Top" Margin="0,4,0,0" />
+        <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <ComboBox ItemsSource="{Binding Accounts}"
+                      SelectedItem="{Binding SelectedAccount}"
+                      Width="220"
+                      PlaceholderText="No account">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="core:AccountSummary">
+                  <TextBlock Text="{Binding Alias}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Content="Manage…" Command="{Binding ManageAccountsCommand}" />
+          </StackPanel>
           <TextBlock Text="{Binding CredentialsText}" />
           <TextBlock Text="{Binding CredentialsDetail}" FontSize="12" Foreground="#888888" TextWrapping="Wrap" />
         </StackPanel>
@@ -54,7 +68,7 @@
           <Button Content="Restart" Command="{Binding RestartCommand}" Width="90" />
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-          <Button Content="Credentials" Command="{Binding OpenCredentialsCommand}" />
+
           <Button Content="Settings" Command="{Binding OpenSettingsCommand}" />
           <Button Content="Logs" Command="{Binding OpenLogsCommand}" />
         </StackPanel>

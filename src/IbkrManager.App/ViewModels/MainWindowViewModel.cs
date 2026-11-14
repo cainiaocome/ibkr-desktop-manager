@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 
 namespace IbkrManager.App.ViewModels;
@@ -10,6 +11,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private AppState _state = AppState.Initial;
     private string? _transientError;
     private bool _busy;
+    private AccountSummary? _selectedAccount;
+    private bool _syncingAccounts;
 
     public MainWindowViewModel(IAppManager manager, IPlatformRuntime runtime, IClock? clock = null)
     {
@@ -25,11 +28,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             () => CanQuit);
         RestartCommand = new AsyncRelayCommand(() => RunAsync(ct => _manager.RestartAsync(ct)), () => CanRestart);
         OpenLogsCommand = new RelayCommand(() => _runtime.OpenInFileExplorer(_runtime.LogDirectory));
-        OpenCredentialsCommand = new RelayCommand(() => CredentialsRequested?.Invoke(this, EventArgs.Empty));
+        ManageAccountsCommand = new RelayCommand(() => AccountsRequested?.Invoke(this, EventArgs.Empty));
         OpenSettingsCommand = new RelayCommand(() => SettingsRequested?.Invoke(this, EventArgs.Empty));
     }
 
-    public event EventHandler? CredentialsRequested;
+    public event EventHandler? AccountsRequested;
 
     public event EventHandler? SettingsRequested;
 
@@ -51,9 +54,30 @@ public sealed class MainWindowViewModel : ViewModelBase
         ? string.IsNullOrWhiteSpace(installation.Version) ? "unknown version" : $"v{installation.Version}"
         : "not detected";
 
-    public string CredentialsText => _state.Credentials.IsComplete
-        ? "username ✓   password ✓"
-        : $"username {(_state.Credentials.HasUsername ? "✓" : "✗")}   password {(_state.Credentials.HasPassword ? "✓" : "✗")}";
+    /// <summary>The accounts the user can choose from, as reported by the manager.</summary>
+    public ObservableCollection<AccountSummary> Accounts { get; } = [];
+
+    /// <summary>
+    /// Two-way with the combo box. Changing it saves the choice (which is also the startup default);
+    /// it never types anything, never restarts the app and never touches a running session.
+    /// </summary>
+    public AccountSummary? SelectedAccount
+    {
+        get => _selectedAccount;
+        set
+        {
+            if (!SetProperty(ref _selectedAccount, value) || _syncingAccounts || value is null)
+            {
+                return;
+            }
+
+            _ = SelectAccountAsync(value.Id);
+        }
+    }
+
+    public string CredentialsText => _state.Credentials.AccountAlias is { } alias
+        ? $"{alias}: username {(_state.Credentials.HasUsername ? "✓" : "✗")}   password {(_state.Credentials.HasPassword ? "✓" : "✗")}"
+        : "no account selected";
 
     public string CredentialsDetail
     {
@@ -62,7 +86,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             var credentials = _state.Credentials;
             if (credentials.IsComplete)
             {
-                return $"source: {credentials.SourcesDescription}";
+                return $"source: {credentials.SourcesDescription} · used by Auto Login and at startup";
             }
 
             var hints = new List<string>();
@@ -123,7 +147,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public RelayCommand OpenLogsCommand { get; }
 
-    public RelayCommand OpenCredentialsCommand { get; }
+    public RelayCommand ManageAccountsCommand { get; }
 
     public RelayCommand OpenSettingsCommand { get; }
 
@@ -149,6 +173,27 @@ public sealed class MainWindowViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         Apply(await Task.Run(() => _manager.InitializeAsync()).ConfigureAwait(true));
+    }
+
+    private async Task SelectAccountAsync(string accountId)
+    {
+        _transientError = null;
+        try
+        {
+            Apply(await Task.Run(() => _manager.SelectAccountAsync(accountId, _shutdown.Token)).ConfigureAwait(true));
+        }
+        catch (OperationCanceledException)
+        {
+            // Windows is shutting down; nothing to report.
+        }
+        catch (Exception ex)
+        {
+            _transientError = ex.Message;
+            _runtime.Log.Error("Selecting the account failed", ex);
+            OnPropertyChanged(nameof(ErrorText));
+            OnPropertyChanged(nameof(HasError));
+            Apply(_manager.State);
+        }
     }
 
     public async Task RefreshAsync()
@@ -190,6 +235,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void Apply(AppState state)
     {
         _state = state;
+        SyncAccounts(state);
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusDetail));
         OnPropertyChanged(nameof(VersionText));
@@ -201,6 +247,44 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(LastActionText));
         OnPropertyChanged(nameof(IsBusy));
         RaiseCommandStates();
+    }
+
+    private void SyncAccounts(AppState state)
+    {
+        _syncingAccounts = true;
+        try
+        {
+            var wanted = state.Accounts.Select(account => account.Id).ToList();
+            if (!Accounts.Select(account => account.Id).SequenceEqual(wanted))
+            {
+                Accounts.Clear();
+                foreach (var account in state.Accounts)
+                {
+                    Accounts.Add(account);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < state.Accounts.Count; i++)
+                {
+                    if (!Equals(Accounts[i], state.Accounts[i]))
+                    {
+                        Accounts[i] = state.Accounts[i];
+                    }
+                }
+            }
+
+            var selected = Accounts.FirstOrDefault(account => account.Id == state.SelectedAccountId);
+            if (!Equals(_selectedAccount, selected))
+            {
+                _selectedAccount = selected;
+                OnPropertyChanged(nameof(SelectedAccount));
+            }
+        }
+        finally
+        {
+            _syncingAccounts = false;
+        }
     }
 
     private void SetBusy(bool busy)

@@ -27,35 +27,38 @@ another program's window on every tick costs that program time.
 The **Login** row shows the outcome of the last Auto Login click (submitted, awaiting 2FA, or failed),
 with the time it happened. It is a record of an action, not a live status.
 
-## 2. Credentials
+## 2. Accounts
 
-Open **Credentials**. The dialog shows where the current values come from and never pre-fills the
-stored password.
+An account is a name plus a credential pair. Names live in `settings.json`; the username and password
+live in **Windows Credential Manager**, encrypted with DPAPI for your Windows user.
 
-![Credentials dialog](images/credentials-window.png)
+Pick the account in the **Account** row of the main window; **Manage…** opens the editor.
 
-- **Remember password** (default on) stores both values in Windows Credential Manager, encrypted with
-  DPAPI for your user account.
-- **Also write as user environment variables** (default off) additionally writes
-  `IBKR_USERNAME` / `IBKR_PASSWORD` to `HKCU\Environment`. This is plaintext in the registry and is
-  inherited by every process you start, so only enable it when some other tool insists on env vars.
-- **Clear stored** removes the Credential Manager entries and any environment values the manager wrote.
+![Accounts dialog](images/accounts-window.png)
 
-Environment variables still win over stored values. That is intentional: a shell that sets them can
-override the stored credential without touching the dialog. If that happens the dialog says so
-("Currently using … env").
+- **New account** — name, username, password. The name is what the UI shows, so use something you
+  recognise (*Main*, *Paper*, *Client A*).
+- **Use for Auto Login** marks the selected account as the one Auto Login uses. That choice is saved
+  and is therefore also the account the manager starts with.
+- **Remember in Windows Credential Manager** (default on) — off keeps that pair in memory until the
+  manager exits, which is handy for a one-off login on a shared machine.
+- **Delete** asks once, then removes the account and its stored secret.
+- Passwords are never pre-filled; the username *is* shown in the editor (it identifies which account
+  an alias means), and only when you have an account selected.
 
-### Variable names
+Changing the picker only saves the choice: nothing is typed, launched, restarted or re-logged-in. To
+switch a running session, **Quit** (or **Force Quit**) and then **Auto Login** with the other account.
 
-Defaults are `IBKR_USERNAME` and `IBKR_PASSWORD`; rename them in **Settings** if they clash with
-something else.
+Environment variables are **not** read any more. Upgrading from 0.3.x migrates the single stored
+credential to an account called *Default*.
 
 ## 3. Auto Login — what it really does
 
 Pressing **Auto Login**:
 
-1. refuses to run if either value is missing, with an inline error such as
-   `Auto Login blocked: IBKR_PASSWORD is not set` — nothing is launched in that case;
+1. refuses to run if the selected account is missing a half, with an inline error such as
+   `Auto Login blocked: account 'Main' — the password of this account is not set` — nothing is
+   launched in that case;
 2. launches IBKR Desktop if it is not already running and waits for the login window;
 3. **clicks the fields and types the credentials like a person** — UI Automation supplies the screen
    rectangles, the manager clicks the username field, replaces its contents and types, moves to the
@@ -116,7 +119,6 @@ Set the login driver to `manual` to make Auto Login report "disabled in Settings
 | Setting | Default | Notes |
 |---|---|---|
 | Executable override | empty | full path to `ntws.exe`; wins over registry discovery |
-| Username / password variable | `IBKR_USERNAME` / `IBKR_PASSWORD` | must differ |
 | Login driver | `auto` | or `manual` (older settings files that say `sendinput` load as `auto`) |
 
 Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain secrets.

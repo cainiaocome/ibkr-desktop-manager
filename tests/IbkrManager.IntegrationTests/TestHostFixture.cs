@@ -63,7 +63,9 @@ public sealed class TestHostFixture : IDisposable
         string? username = null,
         string? password = null,
         bool ignoreClose = false,
-        bool spawnChild = false)
+        bool spawnChild = false,
+        IReadOnlyList<(string Alias, string Username, string Password)>? accounts = null,
+        string? selectAlias = null)
     {
         var output = Path.Combine(Path.GetTempPath(), "ibkr-testhost-" + Guid.NewGuid().ToString("N") + ".json");
         _outputFiles.Add(output);
@@ -71,12 +73,37 @@ public sealed class TestHostFixture : IDisposable
 
         var log = new RecordingLog();
         var process = new Win32ProcessController(Profile, log);
-        var session = new SessionCredentialStore();
-        var resolver = new CredentialResolver([session]);
+        var settings = new InMemorySettingsStore();
+        var accountService = new AccountService(settings, new FakeCredentialStore(), new SessionCredentialStore(), log);
         if (username is not null)
         {
-            session.SaveAsync(new Secret(username), Secret.From(password), CredentialWriteOptions.SessionOnly)
-                .GetAwaiter().GetResult();
+            // Session-only: the stub tests must not touch the real Windows Credential Manager.
+            accountService
+                .SaveAsync(new AccountEdit(null, "Test", new Secret(username), Secret.From(password), Persist: false))
+                .GetAwaiter()
+                .GetResult();
+        }
+
+        if (accounts is not null)
+        {
+            foreach (var (alias, accountUser, accountPassword) in accounts)
+            {
+                accountService
+                    .SaveAsync(new AccountEdit(
+                        null,
+                        alias,
+                        new Secret(accountUser),
+                        new Secret(accountPassword),
+                        Persist: false))
+                    .GetAwaiter()
+                    .GetResult();
+            }
+
+            if (selectAlias is not null)
+            {
+                var selected = accountService.List().First(account => account.Alias == selectAlias);
+                accountService.Select(selected.Id);
+            }
         }
 
         var driver = new SendInputLoginDriver(process, SystemClock.Instance, log);
@@ -86,7 +113,7 @@ public sealed class TestHostFixture : IDisposable
             new WindowsAppLocator(Profile, new UninstallRegistry()),
             () => HostPath);
 
-        var manager = new AppManager(locator, process, resolver, driver, Profile, SystemClock.Instance, log);
+        var manager = new AppManager(locator, process, accountService, driver, Profile, SystemClock.Instance, log);
 
         var startInfo = new ProcessStartInfo
         {

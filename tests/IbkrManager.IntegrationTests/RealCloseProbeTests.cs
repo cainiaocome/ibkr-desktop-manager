@@ -36,7 +36,7 @@ public sealed class RealCloseProbeTests(ITestOutputHelper output)
         var manager = new AppManager(
             new WindowsAppLocator(Profile, new UninstallRegistry()),
             process,
-            new CredentialResolver([new SessionCredentialStore()]),
+            new AccountService(new InMemorySettingsStore(), new FakeCredentialStore(), new SessionCredentialStore()),
             new ManualLoginDriver(),
             Profile,
             SystemClock.Instance,

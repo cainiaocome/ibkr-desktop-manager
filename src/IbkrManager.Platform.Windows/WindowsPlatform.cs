@@ -23,20 +23,8 @@ public sealed class WindowsPlatform : IPlatformRuntime
         Log = new RedactingLog(_fileLog, _redactor);
         SettingsStore = settingsStore ?? new JsonSettingsStore(Path.Combine(dataDirectory, "settings.json"), Log);
 
-        var environment = new WindowsUserEnvironment();
-        _credentialStore = new WindowsCredentialStore(environment, () => SettingsStore.Load(), Log);
-
-        var resolver = new CredentialResolver(
-        [
-            new ConfiguredEnvironmentCredentialProvider(
-                () => (SettingsStore.Load().UsernameVariable, SettingsStore.Load().PasswordVariable)),
-            new UserEnvironmentCredentialProvider(
-                () => SettingsStore.Load().UsernameVariable,
-                () => SettingsStore.Load().PasswordVariable,
-                environment),
-            new CredentialManagerCredentialProvider(_credentialStore),
-            _sessionStore,
-        ], _redactor);
+        _credentialStore = new WindowsCredentialStore(Log);
+        Accounts = new AccountService(SettingsStore, _credentialStore, _sessionStore, Log, _redactor);
 
         _process = new Win32ProcessController(Profile, Log);
         var uia = new UiaSession(_process, Profile, Log);
@@ -63,7 +51,7 @@ public sealed class WindowsPlatform : IPlatformRuntime
         Manager = new AppManager(
             locator,
             _process,
-            resolver,
+            Accounts,
             driver,
             Profile,
             SystemClock.Instance,
@@ -73,13 +61,14 @@ public sealed class WindowsPlatform : IPlatformRuntime
 
     public IAppManager Manager { get; }
 
+    public IAccountService Accounts { get; }
+
+    public ICredentialStore CredentialStore => _credentialStore;
+
     public AppProfile Profile { get; }
 
     public IAppSettingsStore SettingsStore { get; }
 
-    public ICredentialStore CredentialStore => _credentialStore;
-
-    public ICredentialStore SessionStore => _sessionStore;
 
     public IAppLog Log { get; }
 

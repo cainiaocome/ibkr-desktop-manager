@@ -6,21 +6,6 @@ namespace IbkrManager.App.Tests;
 public sealed class SettingsViewModelTests
 {
     [Fact]
-    public async Task Duplicate_variable_names_are_rejected()
-    {
-        var runtime = new FakeRuntime(new FakeAppManager { State = States.Stopped });
-        var viewModel = new SettingsViewModel(runtime)
-        {
-            UsernameVariable = "SAME",
-            PasswordVariable = "same",
-        };
-
-        await viewModel.SaveCommand.ExecuteAsync();
-
-        Assert.Contains("different", viewModel.Error);
-    }
-
-    [Fact]
     public async Task Missing_executable_is_rejected()
     {
         var runtime = new FakeRuntime(new FakeAppManager { State = States.Stopped });
@@ -40,8 +25,6 @@ public sealed class SettingsViewModelTests
         var runtime = new FakeRuntime(new FakeAppManager { State = States.Stopped });
         var viewModel = new SettingsViewModel(runtime)
         {
-            UsernameVariable = "MY_USER",
-            PasswordVariable = "MY_PASS",
             LoginDriver = "manual",
         };
         var closed = false;
@@ -50,8 +33,6 @@ public sealed class SettingsViewModelTests
         await viewModel.SaveCommand.ExecuteAsync();
 
         var saved = runtime.SettingsStore.Load();
-        Assert.Equal("MY_USER", saved.UsernameVariable);
-        Assert.Equal("MY_PASS", saved.PasswordVariable);
         Assert.Equal("manual", saved.LoginDriver);
         Assert.True(closed);
         Assert.False(viewModel.HasError);
@@ -62,27 +43,33 @@ public sealed class SettingsViewModelTests
     {
         var runtime = new FakeRuntime(
             new FakeAppManager { State = States.Stopped },
-            new AppSettings { UsernameVariable = "U", PasswordVariable = "P", LoginDriver = "manual" });
+            new AppSettings { LoginDriver = "manual" });
 
         var viewModel = new SettingsViewModel(runtime);
 
-        Assert.Equal("U", viewModel.UsernameVariable);
         Assert.Equal("manual", viewModel.LoginDriver);
         Assert.Contains("auto", viewModel.LoginDrivers);
     }
 
     [Fact]
-    public async Task Saving_a_driver_keeps_the_credential_preferences()
+    public async Task Saving_settings_keeps_the_accounts_and_the_selection()
     {
         var runtime = new FakeRuntime(
             new FakeAppManager { State = States.Stopped },
-            new AppSettings { PersistToCredentialManager = false, WriteUserEnvironmentVariables = true });
+            new AppSettings
+            {
+                PersistToCredentialManager = false,
+                Accounts = [new AccountProfile { Id = "main", Alias = "Main" }],
+                SelectedAccountId = "main",
+            });
 
         var viewModel = new SettingsViewModel(runtime) { LoginDriver = "manual" };
         await viewModel.SaveCommand.ExecuteAsync();
 
+        // The settings dialog must not wipe user data it does not edit.
         var saved = runtime.SettingsStore.Load();
         Assert.False(saved.PersistToCredentialManager);
-        Assert.True(saved.WriteUserEnvironmentVariables);
+        Assert.Equal("Main", Assert.Single(saved.Accounts).Alias);
+        Assert.Equal("main", saved.SelectedAccountId);
     }
 }

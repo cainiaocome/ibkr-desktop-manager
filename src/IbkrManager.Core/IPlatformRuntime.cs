@@ -12,10 +12,8 @@ public interface IPlatformRuntime : IDisposable
 
     IAppSettingsStore SettingsStore { get; }
 
-    ICredentialStore CredentialStore { get; }
-
-    /// <summary>Lifetime-of-process credential store used when "remember" is unchecked.</summary>
-    ICredentialStore SessionStore { get; }
+    /// <summary>Accounts (aliases + selected id); secrets stay in the platform store.</summary>
+    IAccountService Accounts { get; }
 
     IAppLog Log { get; }
 

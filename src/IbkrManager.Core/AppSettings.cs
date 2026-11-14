@@ -7,16 +7,17 @@ public sealed record AppSettings
 
     public string? ExecutablePathOverride { get; init; }
 
-    public string UsernameVariable { get; init; } = "IBKR_USERNAME";
+    /// <summary>Named accounts. Aliases only — the credential pairs live in the secret store.</summary>
+    public IReadOnlyList<AccountProfile> Accounts { get; init; } = [];
 
-    public string PasswordVariable { get; init; } = "IBKR_PASSWORD";
+    /// <summary>The account Auto Login uses; also the default when the manager starts.</summary>
+    public string? SelectedAccountId { get; init; }
 
     /// <summary>"auto" (clicks and types into the login window) or "manual" (never types).</summary>
     public string LoginDriver { get; init; } = "auto";
 
+    /// <summary>Default for the "remember" checkbox in the accounts dialog.</summary>
     public bool PersistToCredentialManager { get; init; } = true;
-
-    public bool WriteUserEnvironmentVariables { get; init; }
 
     public bool StartWithWindows { get; init; }
 
@@ -24,14 +25,37 @@ public sealed record AppSettings
 
     public bool CheckForUpdates { get; init; }
 
-    public AppSettings Normalize() => this with
+    public AppSettings Normalize()
     {
-        UsernameVariable = string.IsNullOrWhiteSpace(UsernameVariable) ? "IBKR_USERNAME" : UsernameVariable.Trim(),
-        PasswordVariable = string.IsNullOrWhiteSpace(PasswordVariable) ? "IBKR_PASSWORD" : PasswordVariable.Trim(),
-        // Anything that is not "manual" means "do it automatically"; older stores wrote
-        // "sendinput" or "uia" for that.
-        LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "auto",
-    };
+        // Aliases are cosmetic, ids are keys: repair the list here once instead of in every consumer.
+        var accounts = new List<AccountProfile>();
+        foreach (var account in Accounts)
+        {
+            if (string.IsNullOrWhiteSpace(account.Id) ||
+                accounts.Any(existing => existing.Id == account.Id))
+            {
+                continue;
+            }
+
+            var alias = string.IsNullOrWhiteSpace(account.Alias)
+                ? $"Account {accounts.Count + 1}"
+                : account.Alias.Trim();
+            accounts.Add(account with { Alias = alias });
+        }
+
+        var selected = accounts.Any(account => account.Id == SelectedAccountId)
+            ? SelectedAccountId
+            : accounts.FirstOrDefault()?.Id;
+
+        return this with
+        {
+            Accounts = accounts,
+            SelectedAccountId = selected,
+            // Anything that is not "manual" means "do it automatically"; older stores wrote
+            // "sendinput" or "uia" for that.
+            LoginDriver = string.Equals(LoginDriver, "manual", StringComparison.OrdinalIgnoreCase) ? "manual" : "auto",
+        };
+    }
 }
 
 public interface IAppSettingsStore

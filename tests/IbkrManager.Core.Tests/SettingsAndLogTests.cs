@@ -14,18 +14,22 @@ public sealed class SettingsAndLogTests
             store.Save(new AppSettings
             {
                 ExecutablePathOverride = @"D:\IBKR\ntws.exe",
-                UsernameVariable = "MY_USER",
-                PasswordVariable = "MY_PASS",
                 LoginDriver = "manual",
-                WriteUserEnvironmentVariables = true,
+                Accounts = [new AccountProfile { Id = "account-1", Alias = "Main" }],
+                SelectedAccountId = "account-1",
             });
 
             var loaded = new JsonSettingsStore(Path.Combine(directory, "settings.json")).Load();
 
             Assert.Equal(@"D:\IBKR\ntws.exe", loaded.ExecutablePathOverride);
-            Assert.Equal("MY_USER", loaded.UsernameVariable);
             Assert.Equal("manual", loaded.LoginDriver);
-            Assert.True(loaded.WriteUserEnvironmentVariables);
+            Assert.Equal("account-1", loaded.SelectedAccountId);
+            var account = Assert.Single(loaded.Accounts);
+            Assert.Equal("Main", account.Alias);
+            // Aliases are not secrets, but usernames and passwords must never reach the file.
+            var json = File.ReadAllText(Path.Combine(directory, "settings.json"));
+            Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("username", json, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -40,7 +44,8 @@ public sealed class SettingsAndLogTests
         try
         {
             var store = new JsonSettingsStore(Path.Combine(directory, "missing.json"));
-            Assert.Equal("IBKR_USERNAME", store.Load().UsernameVariable);
+            Assert.Empty(store.Load().Accounts);
+            Assert.Null(store.Load().SelectedAccountId);
         }
         finally
         {
@@ -70,18 +75,26 @@ public sealed class SettingsAndLogTests
     }
 
     [Fact]
-    public void AppSettings_normalize_repairs_blank_values()
+    public void AppSettings_normalize_repairs_accounts_and_the_selection()
     {
         var normalized = new AppSettings
         {
-            UsernameVariable = "  ",
-            PasswordVariable = "",
             LoginDriver = "Manual",
+            Accounts =
+            [
+                new AccountProfile { Id = "a", Alias = "  " },
+                new AccountProfile { Id = "a", Alias = "duplicate id" },
+                new AccountProfile { Id = "", Alias = "no id" },
+                new AccountProfile { Id = "b", Alias = " Paper " },
+            ],
+            SelectedAccountId = "missing",
         }.Normalize();
 
-        Assert.Equal("IBKR_USERNAME", normalized.UsernameVariable);
-        Assert.Equal("IBKR_PASSWORD", normalized.PasswordVariable);
         Assert.Equal("manual", normalized.LoginDriver);
+        Assert.Equal(2, normalized.Accounts.Count);
+        Assert.Equal("Account 1", normalized.Accounts[0].Alias);
+        Assert.Equal("Paper", normalized.Accounts[1].Alias);
+        Assert.Equal("a", normalized.SelectedAccountId);
     }
 
     [Fact]

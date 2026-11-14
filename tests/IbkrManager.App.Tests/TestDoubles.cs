@@ -21,6 +21,19 @@ internal sealed class FakeAppManager : IAppManager
 
     public int RestartCalls { get; private set; }
 
+    public int SelectAccountCalls { get; private set; }
+
+    public int SaveAccountCalls { get; private set; }
+
+    public int DeleteAccountCalls { get; private set; }
+
+    public string? LastSelectedAccountId { get; private set; }
+
+    public AccountEdit? LastAccountEdit { get; private set; }
+
+    /// <summary>The edit with the secrets revealed, captured while they are still alive.</summary>
+    public AccountEditValues? LastEditValues { get; private set; }
+
     public int TickCalls { get; private set; }
 
     /// <summary>Whether each TickAsync ran on a thread-pool thread (i.e. off the UI thread).</summary>
@@ -61,6 +74,54 @@ internal sealed class FakeAppManager : IAppManager
         return Complete();
     }
 
+    public Task<AppState> SelectAccountAsync(string accountId, CancellationToken cancellationToken = default)
+    {
+        SelectAccountCalls++;
+        LastSelectedAccountId = accountId;
+        State = State with { SelectedAccountId = accountId };
+        return Complete();
+    }
+
+    public Task<AppState> SaveAccountAsync(AccountEdit edit, CancellationToken cancellationToken = default)
+    {
+        SaveAccountCalls++;
+        LastAccountEdit = edit;
+        LastEditValues = new AccountEditValues(
+            edit.Id,
+            edit.Alias,
+            edit.Username?.Reveal(),
+            edit.Password?.Reveal(),
+            edit.Persist);
+        var id = edit.Id ?? "new-" + (State.Accounts.Count + 1);
+        var others = State.Accounts.Where(account => account.Id != id).ToList();
+        var previous = State.Accounts.FirstOrDefault(account => account.Id == id);
+        others.Add(new AccountSummary(
+            id,
+            edit.Alias,
+            edit.Username is not null || previous?.HasUsername == true,
+            edit.Password is not null || previous?.HasPassword == true,
+            CredentialSource.CredentialManager));
+        State = State with
+        {
+            Accounts = others,
+            SelectedAccountId = State.SelectedAccountId ?? id,
+        };
+        return Complete();
+    }
+
+    public Task<AppState> DeleteAccountAsync(string accountId, CancellationToken cancellationToken = default)
+    {
+        DeleteAccountCalls++;
+        State = State with
+        {
+            Accounts = State.Accounts.Where(account => account.Id != accountId).ToList(),
+            SelectedAccountId = State.SelectedAccountId == accountId
+                ? State.Accounts.FirstOrDefault(account => account.Id != accountId)?.Id
+                : State.SelectedAccountId,
+        };
+        return Complete();
+    }
+
     private Task<AppState> Complete()
     {
         if (NextResult is not null)
@@ -75,11 +136,7 @@ internal sealed class FakeAppManager : IAppManager
 
 internal sealed class FakeCredentialStore : ICredentialStore
 {
-    public string? UsernameValue { get; private set; }
-
-    public string? PasswordValue { get; private set; }
-
-    public CredentialWriteOptions? LastOptions { get; private set; }
+    private readonly Dictionary<string, (string? Username, string? Password)> _values = [];
 
     public int SaveCalls { get; private set; }
 
@@ -91,29 +148,31 @@ internal sealed class FakeCredentialStore : ICredentialStore
 
     public bool IsSupported => true;
 
-    public bool IsAvailable => true;
+    public string? Read(string accountId, CredentialKind kind) =>
+        _values.TryGetValue(accountId, out var value)
+            ? kind == CredentialKind.Username ? value.Username : value.Password
+            : null;
 
-    public string? Read(CredentialKind kind) => kind == CredentialKind.Username ? UsernameValue : PasswordValue;
+    public bool HasStoredValue(string accountId, CredentialKind kind) => Read(accountId, kind) is { Length: > 0 };
 
-    public bool HasStoredValue(CredentialKind kind) => Read(kind) is { Length: > 0 };
+    public string? ReadLegacy(CredentialKind kind) => null;
 
-    public Task SaveAsync(Secret? username, Secret? password, CredentialWriteOptions options, CancellationToken cancellationToken = default)
+    public Task SaveAsync(string accountId, Secret? username, Secret? password, CancellationToken cancellationToken = default)
     {
         SaveCalls++;
-        LastOptions = options;
-        UsernameValue = username?.Reveal();
-        PasswordValue = password?.Reveal();
+        _values[accountId] = (username?.Reveal(), password?.Reveal());
         return Task.CompletedTask;
     }
 
-    public Task ClearAsync(CancellationToken cancellationToken = default)
+    public Task ClearAsync(string accountId, CancellationToken cancellationToken = default)
     {
         ClearCalls++;
-        UsernameValue = null;
-        PasswordValue = null;
+        _values.Remove(accountId);
         return Task.CompletedTask;
     }
 }
+
+internal sealed record AccountEditValues(string? Id, string Alias, string? Username, string? Password, bool Persist);
 
 internal sealed class FakeRuntime : IPlatformRuntime
 {
@@ -121,8 +180,7 @@ internal sealed class FakeRuntime : IPlatformRuntime
     {
         Manager = manager ?? new FakeAppManager();
         SettingsStore = new InMemorySettingsStore(settings);
-        CredentialStore = new FakeCredentialStore();
-        SessionStore = new FakeCredentialStore();
+        Accounts = new AccountService(SettingsStore, new FakeCredentialStore(), new FakeCredentialStore());
     }
 
     public IAppManager Manager { get; }
@@ -131,9 +189,7 @@ internal sealed class FakeRuntime : IPlatformRuntime
 
     public IAppSettingsStore SettingsStore { get; }
 
-    public ICredentialStore CredentialStore { get; }
-
-    public ICredentialStore SessionStore { get; }
+    public IAccountService Accounts { get; }
 
     public IAppLog Log { get; } = NullAppLog.Instance;
 
@@ -163,5 +219,18 @@ internal static class States
         Status = AppStatus.Running,
         Installation = Installation,
         ProcessId = 4242,
+    };
+
+    public static readonly AccountSummary MainAccount = new("main", "Main", true, true, CredentialSource.CredentialManager);
+
+    public static readonly AccountSummary PaperAccount = new("paper", "Paper", true, true, CredentialSource.CredentialManager);
+
+    public static AppState WithAccounts => Stopped with
+    {
+        Accounts = [MainAccount, PaperAccount],
+        SelectedAccountId = MainAccount.Id,
+        Credentials = new ResolvedCredentials(new Secret("main-user"), new Secret("main-pass"),
+            CredentialSource.CredentialManager, CredentialSource.CredentialManager,
+            accountId: MainAccount.Id, accountAlias: MainAccount.Alias),
     };
 }

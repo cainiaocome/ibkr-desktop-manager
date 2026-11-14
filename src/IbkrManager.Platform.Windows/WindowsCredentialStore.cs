@@ -15,16 +15,9 @@ public sealed class WindowsCredentialStore : ICredentialStore
     private const uint CredentialPersistLocalMachine = 2;
     private const string TargetPrefix = "IbkrDesktopManager";
 
-    private readonly IUserEnvironment _environment;
-    private readonly Func<AppSettings> _settings;
     private readonly IAppLog _log;
 
-    public WindowsCredentialStore(IUserEnvironment environment, Func<AppSettings> settings, IAppLog log)
-    {
-        _environment = environment;
-        _settings = settings;
-        _log = log;
-    }
+    public WindowsCredentialStore(IAppLog log) => _log = log;
 
     public CredentialSource Source => CredentialSource.CredentialManager;
 
@@ -34,14 +27,17 @@ public sealed class WindowsCredentialStore : ICredentialStore
 
     public bool IsAvailable => IsSupported;
 
-    public string? Read(CredentialKind kind)
+    public string? Read(string accountId, CredentialKind kind) => ReadTarget(TargetFor(accountId, kind));
+
+    public string? ReadLegacy(CredentialKind kind) => ReadTarget(LegacyTargetFor(kind));
+
+    private string? ReadTarget(string target)
     {
         if (!IsSupported)
         {
             return null;
         }
 
-        var target = TargetFor(kind);
         var handle = IntPtr.Zero;
         try
         {
@@ -76,55 +72,32 @@ public sealed class WindowsCredentialStore : ICredentialStore
         }
     }
 
-    public bool HasStoredValue(CredentialKind kind) => Read(kind) is { Length: > 0 };
+    public bool HasStoredValue(string accountId, CredentialKind kind) => Read(accountId, kind) is { Length: > 0 };
 
-    public Task SaveAsync(Secret? username, Secret? password, CredentialWriteOptions options, CancellationToken cancellationToken = default)
+    public Task SaveAsync(string accountId, Secret? username, Secret? password, CancellationToken cancellationToken = default)
     {
-        if (options.PersistInCredentialManager)
-        {
-            WriteOrDelete(CredentialKind.Username, username);
-            WriteOrDelete(CredentialKind.Password, password);
-            _log.Info("Stored credentials in Windows Credential Manager");
-        }
-        else
-        {
-            Delete(CredentialKind.Username);
-            Delete(CredentialKind.Password);
-        }
-
-        if (options.WriteUserEnvironment)
-        {
-            var settings = _settings();
-            WriteEnvironment(settings.UsernameVariable, username);
-            WriteEnvironment(settings.PasswordVariable, password);
-            _log.Warn("Wrote credentials to the user environment (plaintext in HKCU\\Environment)");
-        }
-
+        WriteOrDelete(TargetFor(accountId, CredentialKind.Username), username);
+        WriteOrDelete(TargetFor(accountId, CredentialKind.Password), password);
+        _log.Info("Stored the account's credentials in Windows Credential Manager");
         return Task.CompletedTask;
     }
 
-    public Task ClearAsync(CancellationToken cancellationToken = default)
+    public Task ClearAsync(string accountId, CancellationToken cancellationToken = default)
     {
-        Delete(CredentialKind.Username);
-        Delete(CredentialKind.Password);
-
-        var settings = _settings();
-        _environment.Delete(settings.UsernameVariable);
-        _environment.Delete(settings.PasswordVariable);
-
-        _log.Info("Cleared stored credentials and managed user environment variables");
+        Delete(TargetFor(accountId, CredentialKind.Username));
+        Delete(TargetFor(accountId, CredentialKind.Password));
+        _log.Info("Cleared the account's stored credentials");
         return Task.CompletedTask;
     }
 
-    private void WriteOrDelete(CredentialKind kind, Secret? secret)
+    private void WriteOrDelete(string target, Secret? secret)
     {
         if (secret is null || secret.IsEmpty)
         {
-            Delete(kind);
+            Delete(target);
             return;
         }
 
-        var target = TargetFor(kind);
         var value = secret.Reveal();
 
         // CredWrite expects the blob as a UTF-16 string without a terminator.
@@ -161,29 +134,23 @@ public sealed class WindowsCredentialStore : ICredentialStore
         }
     }
 
-    private void Delete(CredentialKind kind)
+    private void Delete(string target)
     {
         // ERROR_NOT_FOUND (1168) simply means nothing was stored.
-        if (!NativeMethods.CredDelete(TargetFor(kind), CredentialTypeGeneric, 0))
+        if (!NativeMethods.CredDelete(target, CredentialTypeGeneric, 0))
         {
             var error = Marshal.GetLastWin32Error();
             if (error != 1168)
             {
-                _log.Warn($"CredDelete failed for {kind} ({error})");
+                _log.Warn($"CredDelete failed for {target} ({error})");
             }
         }
     }
 
-    private void WriteEnvironment(string name, Secret? secret)
-    {
-        if (secret is null || secret.IsEmpty)
-        {
-            _environment.Delete(name);
-            return;
-        }
+    private static string TargetFor(string accountId, CredentialKind kind) =>
+        $"{TargetPrefix}/{accountId}/{kind.ToString().ToLowerInvariant()}";
 
-        _environment.Write(name, secret.Reveal());
-    }
-
-    private static string TargetFor(CredentialKind kind) => $"{TargetPrefix}/{kind.ToString().ToLowerInvariant()}";
+    /// <summary>The 0.3.x target: one un-named pair.</summary>
+    private static string LegacyTargetFor(CredentialKind kind) =>
+        $"{TargetPrefix}/{kind.ToString().ToLowerInvariant()}";
 }

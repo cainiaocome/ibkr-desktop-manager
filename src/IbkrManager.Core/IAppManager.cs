@@ -18,6 +18,13 @@ public interface IAppManager
 
     Task<AppState> AutoLoginAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Changes which account Auto Login uses; also the default at startup.</summary>
+    Task<AppState> SelectAccountAsync(string accountId, CancellationToken cancellationToken = default);
+
+    Task<AppState> SaveAccountAsync(AccountEdit edit, CancellationToken cancellationToken = default);
+
+    Task<AppState> DeleteAccountAsync(string accountId, CancellationToken cancellationToken = default);
+
     Task<AppState> QuitAsync(bool force = false, CancellationToken cancellationToken = default);
 
     Task<AppState> RestartAsync(CancellationToken cancellationToken = default);

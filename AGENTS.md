@@ -8,7 +8,7 @@ that still need a real Windows install to verify.
 
 ```bash
 dotnet build                                    # whole solution (net8.0, warnings are errors)
-dotnet test                                     # 163 tests, runs on Linux/Windows/macOS
+dotnet test                                     # 168 tests, runs on Linux/Windows/macOS
 dotnet format IbkrDesktopManager.sln --verify-no-changes
 dotnet run --project src/IbkrManager.App        # needs a display; shows "Windows is required" off-Windows
 dotnet publish src/IbkrManager.App -c Release -r win-x64 --self-contained \
@@ -116,6 +116,9 @@ Facts learned the hard way (do not regress them):
 
 - Credentials must never reach logs, argv, settings files or the launched app's environment:
   use `Secret`, and log through the `IAppLog` you are given (it is wrapped in `RedactingLog`).
+- Accounts are the only credential source: aliases + ids in `settings.json`, pairs in Credential
+  Manager keyed by account id. Environment variables are deliberately **not** read (0.4.0 removed
+  them); do not reintroduce an env provider — it made "which credentials am I using?" ambiguous.
 - New IBKR Desktop behaviour (window titles, install paths, timings) belongs in
   `src/IbkrManager.Core/app-profile.json`, not in code.
 - Do not commit `artifacts/`, `bin/`, `obj/`, `TestResults/` (ignored).

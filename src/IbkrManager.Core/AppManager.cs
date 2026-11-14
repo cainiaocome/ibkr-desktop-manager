@@ -10,7 +10,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
 
     private readonly IAppLocator _locator;
     private readonly IProcessController _process;
-    private readonly ICredentialResolver _credentials;
+    private readonly IAccountService _accounts;
     private readonly ILoginDriver _loginDriver;
     private readonly IClock _clock;
     private readonly IAppLog _log;
@@ -31,7 +31,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     public AppManager(
         IAppLocator locator,
         IProcessController process,
-        ICredentialResolver credentials,
+        IAccountService accounts,
         ILoginDriver loginDriver,
         AppProfile profile,
         IClock clock,
@@ -41,7 +41,7 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     {
         _locator = locator;
         _process = process;
-        _credentials = credentials;
+        _accounts = accounts;
         _loginDriver = loginDriver;
         Profile = profile;
         _clock = clock;
@@ -122,14 +122,20 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             _failed = false;
             _lastError = null;
 
-            var credentials = _credentials.Resolve();
+            var credentials = _accounts.Resolve();
+            if (credentials.AccountId is null)
+            {
+                throw new AppManagerException(
+                    "Auto Login blocked: no account is selected. Add one in Manage accounts.");
+            }
+
             if (!credentials.IsComplete)
             {
                 var hint = !credentials.HasUsername
                     ? credentials.UsernameHint ?? "username is not set"
                     : credentials.PasswordHint ?? "password is not set";
                 throw new AppManagerException(
-                    $"Auto Login blocked: {hint}. Add it in the Credentials dialog or set the environment variable.");
+                    $"Auto Login blocked: account {credentials.AccountDescription} — {hint}.");
             }
 
             EnsureInstalled();
@@ -248,6 +254,36 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
     }
 
     private readonly record struct CloseOutcome(bool Exited, CloseConfirmation Confirmation, string Message);
+
+    public Task<AppState> SelectAccountAsync(string accountId, CancellationToken cancellationToken = default) =>
+        ExecuteAsync("Select account", cancellationToken, ct =>
+        {
+            _failed = false;
+            _lastError = null;
+            _accounts.Select(accountId);
+            _lastAction = $"Account {_accounts.Selected?.Alias ?? accountId} selected";
+            _log.Info($"Selected account '{_accounts.Selected?.Alias}'");
+            return Task.CompletedTask;
+        });
+
+    public Task<AppState> SaveAccountAsync(AccountEdit edit, CancellationToken cancellationToken = default) =>
+        ExecuteAsync("Save account", cancellationToken, async ct =>
+        {
+            _failed = false;
+            _lastError = null;
+            var saved = await _accounts.SaveAsync(edit, ct).ConfigureAwait(false);
+            _lastAction = $"Saved account '{saved.Alias}'";
+        });
+
+    public Task<AppState> DeleteAccountAsync(string accountId, CancellationToken cancellationToken = default) =>
+        ExecuteAsync("Delete account", cancellationToken, async ct =>
+        {
+            _failed = false;
+            _lastError = null;
+            var alias = _accounts.List().FirstOrDefault(account => account.Id == accountId)?.Alias;
+            await _accounts.DeleteAsync(accountId, ct).ConfigureAwait(false);
+            _lastAction = alias is null ? "Account deleted" : $"Deleted account '{alias}'";
+        });
 
     public Task<AppState> RestartAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("Restart", cancellationToken, async ct =>
@@ -377,7 +413,9 @@ public sealed class AppManager : IAppManager, IAsyncDisposable
             ProcessId = _process.ProcessId,
             StartedAt = _process.StartedAt,
             LastAttempt = _lastAttempt,
-            Credentials = _credentials.Resolve(),
+            Credentials = _accounts.Resolve(),
+            Accounts = _accounts.List(),
+            SelectedAccountId = _accounts.SelectedId,
             LastError = _lastError,
             LastAction = _lastAction,
             IsBusy = _busy,

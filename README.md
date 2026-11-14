@@ -24,14 +24,14 @@ refusing them:
 IBKR Desktop has no supported way to launch and sign in from a script, and no way to see whether
 it is installed, running or stuck at the login screen. This manager gives you:
 
-- live status: installed version, process/PID/uptime, whether credentials are available (and from where),
-  whether the app sits at the login screen, is waiting for 2FA, or is logged in;
+- live status: installed version, process/PID/uptime, and whether the selected account has both
+  credential halves;
 - **Start / Quit / Restart** with a graceful close and a process-tree fallback, plus a kill-on-close
   job object so an orphaned trading session can never outlive the manager;
 - an explicit **Auto Login** button that launches the app if needed and types the credentials —
   and refuses with a clear error when none are configured;
-- a **Credentials** dialog that stores the password in Windows Credential Manager (DPAPI), with an
-  opt-in "also write environment variables" escape hatch;
+- **accounts**: named credential pairs (e.g. *Main*, *Paper*, *Client A*) in Windows Credential
+  Manager (DPAPI), with a picker in the main window and one marked as the startup default;
 - no telemetry, no network calls, no background services.
 
 ## Install
@@ -50,27 +50,22 @@ folder (plus `%LOCALAPPDATA%\IbkrManager` if you want the settings and logs gone
 Requires Windows 10/11 x64 and [IBKR Desktop](https://www.interactivebrokers.com/en/trading/ibkr-desktop-download.php)
 installed (the manager finds it via the registry, `C:\Program Files\IBKR Desktop` or `C:\ntws`).
 
-## Credentials
+## Accounts
 
-Resolution order, first hit wins, and the UI always shows the effective source:
+Each account is a name plus a credential pair. Names live in `settings.json`; the username and
+password live in **Windows Credential Manager**, encrypted with DPAPI for your Windows user.
 
-| # | Source | Where it is stored |
-|---|---|---|
-| 1 | `IBKR_USERNAME` / `IBKR_PASSWORD` in the **process** environment | nowhere — it is what you launched the manager with |
-| 2 | the same names in the **user** environment (HKCU\Environment) | plaintext in the registry, only if you opt in |
-| 3 | **Windows Credential Manager** entries written by the Credentials dialog | DPAPI, per user |
-| 4 | values typed into the dialog for this session only | memory |
-
-```powershell
-# one-off, nothing persisted
-$env:IBKR_USERNAME = "your-account"
-$env:IBKR_PASSWORD = "your-password"
-.\IbkrDesktopManager.exe
+```
+Account   [ Main ▾ ]  [ Manage… ]        ← this one is used by Auto Login and at startup
 ```
 
-The password is deliberately **not** stored in an environment variable by default: env vars are
-plaintext in the registry, inherited by every child process (including IBKR Desktop), and easy to
-leak into logs and crash dumps. Usernames are not secret, so both are fine there.
+- **Manage…** adds, edits, deletes and renames accounts, and picks which one is used.
+- Changing the picker only saves the choice: nothing is typed, launched or restarted.
+- **Remember in Windows Credential Manager** off keeps that pair in memory until the manager exits.
+- Credentials are never written to settings, argv, the IBKR process environment or the logs.
+- Upgrading from 0.3.x moves the single stored credential into an account called *Default*; the old
+  entries stay for a downgrade. Environment variables are **no longer read** — if you relied on
+  `IBKR_USERNAME`/`IBKR_PASSWORD`, add an account once.
 
 **Auto Login never bypasses 2FA.** IBKR will still ask for a security code; the manager stops at
 "Awaiting 2FA" and tells you to finish in the app.

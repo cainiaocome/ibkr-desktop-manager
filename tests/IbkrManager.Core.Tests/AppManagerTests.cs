@@ -69,21 +69,20 @@ public sealed class AppManagerTests
     public async Task AutoLogin_blocks_before_launching_when_the_password_is_missing()
     {
         var harness = new Harness(
-            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", null, "IBKR_PASSWORD")]);
+            password: null);
 
         var state = await harness.Manager.AutoLoginAsync();
 
         Assert.Equal(0, harness.Process.StartCount);
         Assert.Equal(0, harness.Driver.CallCount);
         Assert.Contains("Auto Login blocked", state.LastError);
-        Assert.Contains("IBKR_PASSWORD", state.LastError);
+        Assert.Contains("password of this account is not set", state.LastError);
     }
 
     [Fact]
     public async Task AutoLogin_launches_a_stopped_app_then_types_the_credentials()
     {
-        var harness = new Harness(
-            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")]);
+        var harness = new Harness();
 
         var state = await harness.Manager.AutoLoginAsync();
 
@@ -100,8 +99,7 @@ public sealed class AppManagerTests
     [Fact]
     public async Task AutoLogin_surfaces_a_driver_failure_and_records_the_attempt()
     {
-        var harness = new Harness(
-            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")]);
+        var harness = new Harness();
         harness.Process.IsRunning = true;
         harness.Process.HasVisibleWindow = true;
         harness.Process.MainWindowTitle = "IBKR Desktop Login";
@@ -120,7 +118,6 @@ public sealed class AppManagerTests
     public async Task AutoLogin_with_the_manual_driver_reports_disabled()
     {
         var harness = new Harness(
-            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")],
             driver: new ManualLoginDriver());
 
         var state = await harness.Manager.AutoLoginAsync();
@@ -253,8 +250,7 @@ public sealed class AppManagerTests
     [Fact]
     public async Task AutoLogin_explains_a_missing_login_screen()
     {
-        var harness = new Harness(
-            providers: [new FakeCredentialProvider(CredentialSource.ProcessEnvironment, "user", "secret-pass")]);
+        var harness = new Harness();
         harness.Process.IsRunning = true;
         harness.Process.HasVisibleWindow = true;
         harness.Driver.Result = LoginResult.DoesNotApply("no login form was exposed through UI Automation");
@@ -295,22 +291,33 @@ public sealed class AppManagerTests
         public Harness(
             AppInstallation? installation = null,
             bool installed = true,
-            ICredentialProvider[]? providers = null,
             ILoginDriver? driver = null,
-            ICloseConfirmationPrompt? confirmation = null)
+            ICloseConfirmationPrompt? confirmation = null,
+            string? username = "user",
+            string? password = "secret-pass",
+            bool withAccount = true,
+            string alias = "Main")
         {
             Installation = installed ? installation ?? TestProfile.Installation : null;
             Clock = new FakeClock();
             Process = new FakeProcessController(Clock);
             Driver = driver as FakeLoginDriver ?? new FakeLoginDriver();
-            Resolver = new CredentialResolver(providers ?? []);
             Log = new RecordingLog();
             Confirmation = confirmation as FakeCloseConfirmationPrompt ?? new FakeCloseConfirmationPrompt();
+            Settings = new InMemorySettingsStore();
+            Store = new InMemoryCredentialStore();
+            Accounts = new AccountService(Settings, Store, new SessionCredentialStore(), Log);
+
+            if (withAccount)
+            {
+                Accounts.SaveAsync(new AccountEdit(null, alias, Secret.From(username), Secret.From(password)))
+                    .GetAwaiter().GetResult();
+            }
 
             Manager = new AppManager(
                 new FakeLocator(Installation),
                 Process,
-                Resolver,
+                Accounts,
                 driver ?? Driver,
                 TestProfile.Fast,
                 Clock,
@@ -326,7 +333,11 @@ public sealed class AppManagerTests
 
         public FakeLoginDriver Driver { get; }
 
-        public CredentialResolver Resolver { get; }
+        public IAccountService Accounts { get; }
+
+        public IAppSettingsStore Settings { get; }
+
+        public InMemoryCredentialStore Store { get; }
 
         public RecordingLog Log { get; }
 

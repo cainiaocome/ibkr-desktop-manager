@@ -58,6 +58,53 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
     }
 
     [Fact]
+    public async Task Auto_login_types_the_selected_account_and_not_the_first_one()
+    {
+        if (!WindowsRequired())
+        {
+            return;
+        }
+
+        var harness = fixture.CreateHarness(
+            accounts:
+            [
+                ("Main", "main-user", "main-password"),
+                ("Paper", "paper-user", "paper-password"),
+            ],
+            selectAlias: "Paper");
+        try
+        {
+            await harness.Manager.InitializeAsync();
+            var state = await harness.Manager.AutoLoginAsync();
+            Assert.Equal("Paper", state.SelectedAccountAlias);
+
+            var typed = default(System.Text.Json.JsonElement);
+            TestHostFixture.WaitUntil(
+                () =>
+                {
+                    try
+                    {
+                        typed = TestHostFixture.ReadPayload(harness.OutputPath);
+                        // Wait for the submit so the payload has the complete username.
+                        return typed.GetProperty("submitted").GetBoolean();
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+                    {
+                        return false;
+                    }
+                },
+                TimeSpan.FromSeconds(30));
+
+            output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
+            Assert.Equal("paper-user", typed.GetProperty("username").GetString());
+        }
+        finally
+        {
+            await harness.Manager.QuitAsync(force: true);
+        }
+    }
+
+    [Fact]
     public async Task Auto_login_blocks_when_no_credentials_are_configured()
     {
         if (!WindowsRequired())

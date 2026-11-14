@@ -16,17 +16,6 @@
       <TextBox Text="{Binding ExecutablePath}" Watermark="C:\Program Files\IBKR Desktop\ntws.exe" />
     </StackPanel>
 
-    <Grid ColumnDefinitions="*,12,*">
-      <StackPanel Spacing="4">
-        <TextBlock Text="Username variable" FontSize="12" Foreground="#888888" />
-        <TextBox Text="{Binding UsernameVariable}" />
-      </StackPanel>
-      <StackPanel Grid.Column="2" Spacing="4">
-        <TextBlock Text="Password variable" FontSize="12" Foreground="#888888" />
-        <TextBox Text="{Binding PasswordVariable}" />
-      </StackPanel>
-    </Grid>
-
     <StackPanel Spacing="4">
       <TextBlock Text="Login driver" FontSize="12" Foreground="#888888" />
       <ComboBox ItemsSource="{Binding LoginDrivers}" SelectedItem="{Binding LoginDriver}" HorizontalAlignment="Stretch" />

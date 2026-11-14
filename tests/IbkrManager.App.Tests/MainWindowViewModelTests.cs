@@ -64,23 +64,70 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task Credential_summary_shows_presence_and_hints_without_values()
+    public async Task Account_summary_shows_presence_and_hints_without_values()
     {
         var credentials = new ResolvedCredentials(
             new Secret("alice-zz"),
             null,
             CredentialSource.Session,
             CredentialSource.None,
-            passwordHint: "IBKR_PASSWORD is not set");
+            passwordHint: "the password of this account is not set",
+            accountId: "main",
+            accountAlias: "Main");
 
-        var harness = new Harness(States.Stopped with { Credentials = credentials });
+        var harness = new Harness(States.Stopped with
+        {
+            Credentials = credentials,
+            Accounts = [States.MainAccount],
+            SelectedAccountId = "main",
+        });
 
         await harness.ViewModel.InitializeAsync();
 
-        Assert.Equal("username ✓   password ✗", harness.ViewModel.CredentialsText);
-        Assert.Contains("IBKR_PASSWORD is not set", harness.ViewModel.CredentialsDetail);
+        Assert.Equal("Main: username ✓   password ✗", harness.ViewModel.CredentialsText);
+        Assert.Contains("password of this account is not set", harness.ViewModel.CredentialsDetail);
         Assert.DoesNotContain("alice-zz", harness.ViewModel.CredentialsText);
         Assert.DoesNotContain("alice-zz", harness.ViewModel.CredentialsDetail);
+    }
+
+    [Fact]
+    public async Task The_account_picker_lists_accounts_and_shows_the_selected_one()
+    {
+        var harness = new Harness(States.WithAccounts);
+
+        await harness.ViewModel.InitializeAsync();
+
+        Assert.Equal(["Main", "Paper"], harness.ViewModel.Accounts.Select(account => account.Alias));
+        Assert.Equal("Main", harness.ViewModel.SelectedAccount?.Alias);
+        Assert.StartsWith("Main: username ✓", harness.ViewModel.CredentialsText);
+    }
+
+    [Fact]
+    public async Task Choosing_another_account_asks_the_manager_to_select_it()
+    {
+        var harness = new Harness(States.WithAccounts);
+        await harness.ViewModel.InitializeAsync();
+
+        harness.ViewModel.SelectedAccount = harness.ViewModel.Accounts[1];
+
+        await Harness.WaitUntil(() => harness.Manager.SelectAccountCalls == 1);
+
+        Assert.Equal("paper", harness.Manager.LastSelectedAccountId);
+        // Selecting an account is not an action on the app: nothing is typed or restarted.
+        Assert.Equal(0, harness.Manager.AutoLoginCalls);
+        Assert.Equal(0, harness.Manager.RestartCalls);
+    }
+
+    [Fact]
+    public async Task Applying_state_does_not_echo_the_selection_back()
+    {
+        var harness = new Harness(States.WithAccounts);
+        await harness.ViewModel.InitializeAsync();
+        var calls = harness.Manager.SelectAccountCalls;
+
+        await harness.ViewModel.RefreshAsync();
+
+        Assert.Equal(calls, harness.Manager.SelectAccountCalls);
     }
 
     [Fact]
@@ -89,15 +136,23 @@ public sealed class MainWindowViewModelTests
         var credentials = new ResolvedCredentials(
             new Secret("alice-zz"),
             new Secret("pw"),
-            CredentialSource.ProcessEnvironment,
-            CredentialSource.CredentialManager);
+            CredentialSource.CredentialManager,
+            CredentialSource.Session,
+            accountId: "main",
+            accountAlias: "Main");
 
-        var harness = new Harness(States.Stopped with { Credentials = credentials });
+        var harness = new Harness(States.Stopped with
+        {
+            Credentials = credentials,
+            Accounts = [States.MainAccount],
+            SelectedAccountId = "main",
+        });
 
         await harness.ViewModel.InitializeAsync();
 
-        Assert.Contains("env", harness.ViewModel.CredentialsDetail);
-        Assert.Contains("credential manager", harness.ViewModel.CredentialsDetail);
+        Assert.Contains("stored", harness.ViewModel.CredentialsDetail);
+        Assert.Contains("this session", harness.ViewModel.CredentialsDetail);
+        Assert.Contains("at startup", harness.ViewModel.CredentialsDetail);
     }
 
     [Fact]
@@ -166,14 +221,14 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task Open_credentials_raises_the_dialog_request()
+    public async Task Manage_accounts_raises_the_dialog_request()
     {
         var harness = new Harness(States.Stopped);
         await harness.ViewModel.InitializeAsync();
         var raised = 0;
-        harness.ViewModel.CredentialsRequested += (_, _) => raised++;
+        harness.ViewModel.AccountsRequested += (_, _) => raised++;
 
-        harness.ViewModel.OpenCredentialsCommand.Execute(null);
+        harness.ViewModel.ManageAccountsCommand.Execute(null);
 
         Assert.Equal(1, raised);
     }
@@ -206,5 +261,14 @@ public sealed class MainWindowViewModelTests
         public FakeRuntime Runtime { get; }
 
         public MainWindowViewModel ViewModel { get; }
+
+        public static async Task WaitUntil(Func<bool> condition, int timeoutMilliseconds = 2000)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+            while (DateTime.UtcNow < deadline && !condition())
+            {
+                await Task.Delay(10);
+            }
+        }
     }
 }

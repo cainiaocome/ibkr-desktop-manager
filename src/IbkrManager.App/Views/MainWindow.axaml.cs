@@ -37,7 +37,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        viewModel.CredentialsRequested += OnCredentialsRequested;
+        viewModel.AccountsRequested += OnAccountsRequested;
         viewModel.SettingsRequested += OnSettingsRequested;
 
         // Answer Windows' session-end messages immediately, and stop our work if the session ends.
@@ -65,16 +65,16 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void OnCredentialsRequested(object? sender, EventArgs e)
+    private async void OnAccountsRequested(object? sender, EventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
-        var dialog = new CredentialsWindow
+        var dialog = new AccountsWindow
         {
-            DataContext = new CredentialsViewModel(viewModel.Runtime),
+            DataContext = new AccountsViewModel(viewModel.Runtime.Manager, viewModel.Runtime),
         };
 
         await dialog.ShowDialog(this);

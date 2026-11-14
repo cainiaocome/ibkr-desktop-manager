@@ -11,12 +11,13 @@ Windows Credential Manager, or an in-app setup dialog.
 **In scope**
 
 - Detect whether IBKR Desktop is installed / running / which version, with PID + uptime.
-- Report whether `IBKR_USERNAME` / `IBKR_PASSWORD` are available, and from which source
-  (never display the values).
+- Report whether the **selected account** has a username and a password (never display the values),
+  and which account is selected.
 - Start / graceful quit / force kill / restart the app.
 - **Auto Login button**: user-triggered — launches the app if needed and fills the login form;
   refuses with a visible error when no credentials are available.
-- **Credentials setup dialog**: enter/update/clear credentials in-app, persisted securely (§7.1).
+- **Accounts**: named credential pairs, add/edit/delete in-app, persisted securely (§7.1), one marked
+  as the startup default and switchable from the main window (§7.2).
 - Release pipeline: build + test + portable zip artifacts on GitHub Actions.
 
 **Out of scope (v1)**
@@ -206,10 +207,10 @@ IBKR Desktop Manager                                   [–][□][×]
 ──────────────────────────────────────────────────────────────
   IBKR Desktop      ● Running        PID 8420 · 00:12:31
   Version           0.12.0 (installed: 0.11.2)
-  Credentials       Username ✓   Password ✓   (env)   [ Set up… ]
+  Account           [ Main ▾ ]  [ Manage… ]   username ✓  password ✓  (stored)
   Login state       ● Awaiting 2FA — finish in the app window
 ──────────────────────────────────────────────────────────────
-  [ Start ] [ Auto Login ] [ Quit ] [ Force Quit ] [ Restart ]   [ Logs ] [ ⚙ ]
+  [ Start ] [ Auto Login ] [ Quit ] [ Force Quit ] [ Restart ]   [ Settings ] [ Logs ]
 ──────────────────────────────────────────────────────────────
   ⚠ Auto Login blocked: IBKR_PASSWORD is not set
   last: autologin typed username, waiting for password field
@@ -218,7 +219,7 @@ IBKR Desktop Manager                                   [–][□][×]
 - Buttons: `Start` (launch, stop at login screen), `Auto Login` (launch if needed + inject),
   `Quit`, `Restart`. `Auto Login` stays clickable so a missing credential produces an explicit
   inline error rather than a mystery-disabled button; a hint sits next to it when a var is absent.
-- `[ Set up… ]` on the credentials row opens the dialog in §7.1 (add / replace / clear / test presence).
+- The account picker + `Manage…` open the dialog in §7.2 (add / edit / delete / choose).
 - Rows use green/amber/red dots; credentials row shows presence + source (`env`), never
   masked values (a mask still leaks length).
 - `Start`/`Auto Login` disabled unless the app is installed; `Quit`, `Force Quit` and `Restart` are
@@ -236,155 +237,80 @@ IBKR Desktop Manager                                   [–][□][×]
 
 - Secrets: `Secret` wrapper type whose `ToString()`/`DebuggerDisplay` is `***`; `ILog` sinks are
   filtered to never receive it. No secrets in argv, logs, temp files, crash dumps, telemetry.
-- Zero out unmanaged buffers where practical; keep secrets out of `appsettings.json`.
-- The password is never placed in the launched app's environment — injection is UI-only.
+- Zero out unmanaged buffers where practical; keep secrets out of `settings.json` (it holds aliases
+  and account ids only).
+- The password is never placed in the launched app's environment — injection is UI-only, and
+  environment variables are no longer a credential source at all.
 - No network calls in v1 except an optional read-only version check (off by default).
 - README must state clearly: this automates a UI, it is not sanctioned by IBKR, 2FA is never
   bypassed, and credentials are your responsibility. MIT-licensed, no warranty.
 
-### 7.1 Credential sources & the setup dialog
+### 7.1 Accounts (credential profiles)
 
-Read chain, first hit wins, effective source shown in the UI:
+An **account** is an alias plus a credential pair:
 
-| # | Source | At rest | Purpose |
-|---|---|---|---|
-| 1 | Process env `IBKR_USERNAME` / `IBKR_PASSWORD` | inherited only | CI/ops contract; deliberately wins so automation can override |
-| 2 | User env vars (`HKCU\Environment`) | **plaintext** in registry | opt-in only, for tooling that expects env vars |
-| 3 | Credential Manager, generic `IbkrDesktopManager/IBKR_*` | DPAPI, per-user | default "Remember" target |
-| 4 | Typed into the dialog, this session only | memory | one-off use |
-
-Password defaults to Credential Manager, not an env var — an env password is plaintext in the
-registry, readable by any process running as that user, inherited by the launched app and its
-children, and easy to leak into logs/dumps. A username is not secret, so env is fine for it.
-
-Setup is an **in-app Avalonia modal, not a system window** (Windows has no per-user env-var
-dialog anyway — only `setx` or System Properties → Environment Variables):
-
-```
-Credentials
-  Username  [ alice                     ]
-  Password  [ ••••••••••••  (stored) 👁 ]   only overwritten when edited
-  ☑ Remember password (Windows Credential Manager)
-  ☐ Also write as user environment variables   ⚠ plaintext in HKCU\Environment
-  Effective source: env (IBKR_PASSWORD) — shadows the stored value
-  [ Clear ]                                  [ Cancel ] [ Save ]
-```
-
-- Writes to user scope only (never machine scope, which needs admin); after saving, refresh the
-  in-memory provider and broadcast `WM_SETTINGCHANGE` so newly started processes see the change
-  (already-running processes keep their old env — hence the manager re-resolves instead of
-  trusting its own inherited env).
-- Shadowing is surfaced, never silent: if an env var overrides a stored value, say so.
-- `Clear` removes the stored credential *and* any env vars the manager wrote; values from
-  external env/1Password are shown as read-only and left alone.
-- No prefill of the stored password, reveal toggle instead of clipboard, no "remember me" without
-  an explicit checkbox, and the dialog is the only place a credential is ever rendered.
-
-### 7.2 Accounts (multiple credential profiles) — proposed, v0.4.0
-
-Today there is one implicit credential: a provider chain resolved into a single
-`ResolvedCredentials`. Multi-account means making "which credentials" an explicit, named choice.
-
-#### Data model
+| Part | Where it lives | At rest |
+|---|---|---|
+| `id`, `alias` | `settings.json` (`accounts[]`) | plaintext, not secret |
+| username, password | Windows Credential Manager, target `IbkrDesktopManager/{id}/{kind}` | DPAPI, per user |
+| a pair typed this session | memory (`SessionCredentialStore`, same target key) | nowhere |
 
 ```csharp
-public enum ProfileKind { Stored, Environment }
-
-public sealed record CredentialProfile           // lives in settings.json
-{
-    public string Id { get; init; }              // opaque, stable, never shown
-    public string Alias { get; init; }           // "Main", "Paper", "Client A"
-    public ProfileKind Kind { get; init; }
-    public string? UsernameVariable { get; init; }   // Environment only
-    public string? PasswordVariable { get; init; }   // Environment only
-}
+public sealed record AccountProfile { string Id; string Alias; }
 
 public sealed record AppSettings
 {
-    public IReadOnlyList<CredentialProfile> Profiles { get; init; } = [];
-    public string? SelectedProfileId { get; init; }   // the "default" at startup
+    IReadOnlyList<AccountProfile> Accounts;
+    string? SelectedAccountId;   // the account Auto Login uses, and the default at startup
 }
 ```
 
-Two profile kinds, because both paths are already supported and used:
+**A profile is a source, not a preference.** Resolution reads *both* halves of the selected account
+and never mixes: the 0.3.x provider chain could pair account A's username with account B's password,
+which is a wrong-account login. The in-memory store is an overlay for the *same* account id (typed
+this session wins over what is stored for that account), never across accounts.
 
-| Kind | Where the pair lives | At rest |
-|---|---|---|
-| `Stored` | Credential Manager targets `IbkrDesktopManager/{id}/username` and `.../password` | DPAPI, per-user |
-| `Environment` | the two named env vars (per profile, defaulting to the settings names) | inherited / `HKCU\Environment` |
+Environment variables are **not** read at all. They were an inherited, plaintext-in-the-registry
+channel that also made "which credentials am I using?" ambiguous; `AccountService` replaced them, and
+`IBKR_USERNAME`/`IBKR_PASSWORD` now do nothing.
 
-**A profile is a source, not a preference.** Resolution stops being a cross-source merge: the
-username *and* password of a `Stored` profile both come from that profile's store entry, and both
-halves of an `Environment` profile come from its two variables. This removes today's ability to end up
-with a username from env and a password from Credential Manager — a wrong-account login waiting to
-happen.
+Selection rules, all in `AppSettings.Normalize()` / `AccountService`:
 
-`ResolvedCredentials` gains `ProfileId`/`ProfileAlias` so state and logs can say *which* account was
-used. Aliases are safe to log; usernames and passwords are not, and stay behind `Secret`.
+- no accounts → `Resolve()` returns an explicit empty pair and Auto Login says
+  "no account is selected. Add one in Manage accounts."
+- dangling `SelectedAccountId` → first account
+- blank alias → `Account N`; duplicate ids dropped; duplicate aliases rejected on save
+- deleting the selected account selects the next one
 
-#### Choosing an account
+Migration (once, when the account list is empty): a pre-0.4 pair at
+`IbkrDesktopManager/username|password` is **copied** into a new account called *Default*, which is
+then selected. The legacy entries are left in place so a downgrade still finds them.
 
-- Main window gets an `Account` row: `[ Main ▾ ]  [ Manage… ]` next to the credential summary.
-- `IAppManager.SelectProfile(string profileId)` persists `SelectedProfileId` and rebuilds state. That
-  persisted selection **is** the startup default — one concept, not two. (`Set as default` as a
-  separate star would let the combo and the default disagree, and users then debug the wrong thing.)
-- `Auto Login` always uses the selected profile. Nothing is automatic: switching the combo never types
-  anything, never restarts the app and never touches a running session.
-- Selection rules: unknown/deleted id → first profile; no profiles at all → a seeded
-  `Environment` profile ("From environment") keeps the current env-var workflow working with zero
-  setup.
-- If the selected profile is incomplete, `Auto Login` fails with "Account Main has no password" — the
-  same hard failure as today, now naming the account.
+### 7.2 The accounts dialog
 
-#### Migration (one time, on load)
-
-1. `settings.json` without `profiles` → seed `From environment` (Kind=Environment, configured variable
-   names) and select it.
-2. If legacy `IbkrDesktopManager/username|password` entries exist, also create `Stored` profile
-   "Default" from them and select **it** (migration must not change what Auto Login types).
-3. Legacy entries are copied, not moved, and cleared only when the user deletes that profile — so
-   downgrading to 0.3.x still finds them.
-4. `AppSettings.Normalize()` repairs dangling ids and blank aliases (alias defaults to `Account N`).
-
-#### GUI: "Manage accounts" replaces the credentials dialog
+An in-app Avalonia modal, not a system window (Windows has no per-user credential UI the manager can
+drive):
 
 ```
 Accounts
-  ● Main       stored · username ✓ password ✓        [ Edit ] [ Delete ]
-  ○ Paper      environment · IBKR_PAPER_* · ✓ ✓      [ Edit ] [ Delete ]
-  ○ From environment  ✓ ✓                            [ Edit ] [ Delete ]
-  [+ Add account]
-──────────────────────────────────────────────────────────
+  ● Main    · in use        stored · username ✓ · password ✓     [ New account ]
+  ○ Paper                   stored · username ✓ · password ✓     [ Use for Auto Login ]
+  ○ Client A                this session · username ✓ · password ✗ [ Delete ]
+─────────────────────────────────────────────────────────────────────────
 Edit "Main"
-  Alias     [ Main                    ]
-  Username  [ alice                   ]
-  Password  [ ••••••••• (stored) 👁 ]      only overwritten when edited
+  Name      [ Main                    ]
+  Username  [ alice                   ]      shown: it identifies which account this is
+  Password  [ •••••••••  (stored) 👁 ]        never pre-filled; blank means "keep the stored one"
   ☑ Remember in Windows Credential Manager
-  ☐ Also write as user environment variables   ⚠ plaintext in HKCU\Environment
-  [ Cancel ] [ Save ]
+  [ Close ]                                                 [ Save ]
 ```
 
-- Deletes need a confirmation; deleting the selected account selects the next one.
-- No password ever pre-filled; the reveal toggle stays the only way to see one.
-- `Test` resolves the pair and reports presence without revealing either half.
-
-#### What does not change
-
-- Single account **per running session**: one app, one login. Switching accounts does not restart or
-  re-login (that would need a live login state machine, which §"Status model" rules out). If you want
-  the other account, `Quit`, then `Auto Login`.
-- Profiles never enter argv, the app's environment, logs or telemetry.
-- `app-profile.json` is untouched: accounts are user data, not app behaviour.
-
-#### Tests
-
-- Core: resolution is per-profile (no cross-source mixing), selection persists, dangling id falls back,
-  migration from legacy single credential, incomplete profile names itself in the error.
-- Platform.Windows: per-profile Credential Manager targets, `ListProfileIds`, legacy read-through
-  (self-skipping off Windows).
-- App: combo binds to profiles, changing it persists and does not act, add/rename/delete flows.
-- Integration (stub host): two stored profiles, Auto Login types the *selected* username — the existing
-  stub records what was typed, so this is provable end-to-end without IBKR.
+- Renaming does not touch the secret; editing one field keeps the stored other half.
+- `Delete` needs a second click (`Really delete?`), then removes the secret and reselects.
+- The main window's `Account` combo is two-way: changing it persists the selection (the startup
+  default). It never types, launches, restarts or re-logs-in — switching a live session is
+  `Quit`, then `Auto Login`.
+- No password is ever rendered, logged, put in argv or in the launched app's environment.
 
 ---
 
@@ -439,7 +365,7 @@ No secrets are needed for CI; signing secrets are the only ones and live in GitH
 | 0 | **Spike** (`docs/ibkr-app-notes.md`): install real app, inventory install paths, process tree, window classes/titles, accessibility dump of the login form | We know which login driver is realistic | done — automated by the `IBKR Desktop probe` workflow |
 | 1 | Skeleton: solution, Avalonia window, `Core` abstractions, CI green | `dotnet test` passes on `windows-latest` | done |
 | 2 | Read-only status: locator, process/window polling, credential resolution + source, version | GUI shows live state, no actions yet | done |
-| 3 | Credentials dialog + persistence (Credential Manager, opt-in env vars, Clear) | Values survive restart, shadowing is visible, `Clear` wipes both | done |
+| 3 | Accounts dialog + persistence (Credential Manager per account, delete, choose default) | Values survive restart, selection survives restart, delete wipes the secret | done |
 | 4 | Lifecycle: start / quit / restart, Job Object, single instance, logs | Start+quit reliable across 20 cycles, no orphans | done (real-app soak still part of the spike) |
 | 5 | Auto-login button: validation, click-and-type driver, 2FA hand-off | Clicking Auto Login types the credentials, waits for IBKR's verdict; missing creds produce a clear error; failures fall back to manual | done, verified by the real-app end-to-end test |
 | 6 | Release pipeline + settings + signing decision | Tagged release has zip + checksums, CI badge green | done (signing wired, off until a cert exists) |
@@ -460,22 +386,22 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.3.0)
+## 11. Implementation status (v0.4.0)
 
 What shipped, and where it lives:
 
 | Design element | Implementation |
 |---|---|
 | State machine + orchestrator | `Core/AppManager.cs` (`TickAsync` driven, no background thread) |
-| Credential chain + redaction | `Core/CredentialResolver.cs`, `Secret`, `SecretRedactor`, `RedactingLog` |
+| Accounts + redaction | `Core/Accounts.cs` (`AccountService`), `ICredentialStore`, `Secret`, `SecretRedactor`, `RedactingLog` |
 | Profile-driven window matching | `Core/AppProfile.cs` + `Core/app-profile.json` |
 | Install discovery | `Platform.Windows/WindowsAppLocator.cs` + `UninstallRegistry.cs` |
 | Process lifecycle + job object | `Platform.Windows/Win32ProcessController.cs`, `JobObject.cs` |
-| Credential Manager + env export | `Platform.Windows/WindowsCredentialStore.cs`, `WindowsUserEnvironment.cs` |
+| Per-account Credential Manager storage | `Platform.Windows/WindowsCredentialStore.cs` (`IbkrDesktopManager/{id}/{kind}`, legacy read for migration) |
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
-| GUI | `App/Views/MainWindow.axaml`, `CredentialsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 163 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| GUI | `App/Views/MainWindow.axaml`, `AccountsWindow.axaml`, `SettingsWindow.axaml` |
+| Tests | 168 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

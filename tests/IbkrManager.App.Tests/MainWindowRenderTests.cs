@@ -29,11 +29,15 @@ public sealed class MainWindowRenderTests
                     AwaitingTwoFactor: true,
                     "Credentials submitted — enter the 2FA code in the app to finish logging in"),
                 LastAction = "Autologin typed username, waiting for password field",
+                Accounts = [States.MainAccount, States.PaperAccount],
+                SelectedAccountId = States.MainAccount.Id,
                 Credentials = new ResolvedCredentials(
                     new Secret("alice"),
                     new Secret("secret-pass"),
-                    CredentialSource.ProcessEnvironment,
-                    CredentialSource.ProcessEnvironment),
+                    CredentialSource.CredentialManager,
+                    CredentialSource.CredentialManager,
+                    accountId: States.MainAccount.Id,
+                    accountAlias: States.MainAccount.Alias),
             },
         };
 
@@ -80,12 +84,12 @@ public sealed class MainWindowRenderTests
     }
 
     [AvaloniaFact]
-    public void Credentials_dialog_renders()
+    public void Accounts_dialog_renders()
     {
-        var manager = new FakeAppManager { State = States.Stopped };
-        var window = new CredentialsWindow
+        var manager = new FakeAppManager { State = States.WithAccounts };
+        var window = new AccountsWindow
         {
-            DataContext = new CredentialsViewModel(new FakeRuntime(manager)),
+            DataContext = new AccountsViewModel(manager, new FakeRuntime(manager)),
         };
 
         window.Show();
@@ -96,7 +100,7 @@ public sealed class MainWindowRenderTests
 
         var directory = Path.Combine(AppContext.BaseDirectory, "screenshots");
         Directory.CreateDirectory(directory);
-        frame!.Save(Path.Combine(directory, "credentials-window.png"));
+        frame!.Save(Path.Combine(directory, "accounts-window.png"));
 
         window.Close();
     }

@@ -14,7 +14,9 @@ public sealed class ResolvedCredentials
         CredentialSource usernameSource,
         CredentialSource passwordSource,
         string? usernameHint = null,
-        string? passwordHint = null)
+        string? passwordHint = null,
+        string? accountId = null,
+        string? accountAlias = null)
     {
         Username = username;
         Password = password;
@@ -22,7 +24,14 @@ public sealed class ResolvedCredentials
         PasswordSource = passwordSource;
         UsernameHint = usernameHint;
         PasswordHint = passwordHint;
+        AccountId = accountId;
+        AccountAlias = accountAlias;
     }
+
+    /// <summary>The account these values belong to (null when no account is selected).</summary>
+    public string? AccountId { get; }
+
+    public string? AccountAlias { get; }
 
     public Secret? Username { get; }
 
@@ -32,7 +41,7 @@ public sealed class ResolvedCredentials
 
     public CredentialSource PasswordSource { get; }
 
-    /// <summary>Actionable hint for the UI, e.g. "IBKR_USERNAME is not set".</summary>
+    /// <summary>Actionable hint for the UI, e.g. "the password of this account is not set".</summary>
     public string? UsernameHint { get; }
 
     public string? PasswordHint { get; }
@@ -54,6 +63,8 @@ public sealed class ResolvedCredentials
 
     public string SourcesDescription =>
         $"username: {UsernameSource.ToDisplayString()} · password: {PasswordSource.ToDisplayString()}";
+
+    public string AccountDescription => AccountAlias is { Length: > 0 } alias ? $"'{alias}'" : "no account";
 
     public override string ToString() =>
         $"ResolvedCredentials(username={UsernameSource.ToDisplayString()}, password={PasswordSource.ToDisplayString()})";

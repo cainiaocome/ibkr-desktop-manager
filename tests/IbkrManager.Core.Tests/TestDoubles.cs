@@ -135,21 +135,47 @@ internal sealed class FakeLoginDriver : ILoginDriver
     }
 }
 
-internal sealed class FakeCredentialProvider(
-    CredentialSource source,
-    string? username,
-    string? password,
-    string displayName = "test provider") : ICredentialProvider
+/// <summary>Credential store with no Win32 behind it: enough for account/resolution tests.</summary>
+internal sealed class InMemoryCredentialStore : ICredentialStore
 {
-    public CredentialSource Source => source;
+    private readonly Dictionary<string, (string? Username, string? Password)> _values = [];
 
-    public string DisplayName => displayName;
+    public string? LegacyUsername { get; set; }
 
-    public bool IsAvailable { get; set; } = true;
+    public string? LegacyPassword { get; set; }
 
-    public string? Read(CredentialKind kind) => kind == CredentialKind.Username ? username : password;
+    public CredentialSource Source => CredentialSource.CredentialManager;
 
-    string ICredentialProvider.HintFor(CredentialKind kind) => $"{displayName} {kind} is not set";
+    public string DisplayName => "in-memory store";
+
+    public bool IsSupported { get; set; } = true;
+
+    public string? Read(string accountId, CredentialKind kind)
+    {
+        if (!_values.TryGetValue(accountId, out var value))
+        {
+            return null;
+        }
+
+        return kind == CredentialKind.Username ? value.Username : value.Password;
+    }
+
+    public bool HasStoredValue(string accountId, CredentialKind kind) => Read(accountId, kind) is { Length: > 0 };
+
+    public string? ReadLegacy(CredentialKind kind) =>
+        kind == CredentialKind.Username ? LegacyUsername : LegacyPassword;
+
+    public Task SaveAsync(string accountId, Secret? username, Secret? password, CancellationToken cancellationToken = default)
+    {
+        _values[accountId] = (username?.Reveal(), password?.Reveal());
+        return Task.CompletedTask;
+    }
+
+    public Task ClearAsync(string accountId, CancellationToken cancellationToken = default)
+    {
+        _values.Remove(accountId);
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class FakeInspector : IWindowInspector

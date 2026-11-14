@@ -16,7 +16,15 @@ public sealed record AppState
     /// <summary>The last Auto Login the user asked for, if any. Not a live state.</summary>
     public LoginAttempt? LastAttempt { get; init; }
 
+    /// <summary>Credentials of the selected account.</summary>
     public ResolvedCredentials Credentials { get; init; } = ResolvedCredentials.Empty;
+
+    public IReadOnlyList<AccountSummary> Accounts { get; init; } = [];
+
+    public string? SelectedAccountId { get; init; }
+
+    public string? SelectedAccountAlias => Accounts
+        .FirstOrDefault(account => account.Id == SelectedAccountId)?.Alias;
 
     public string? LastError { get; init; }
 

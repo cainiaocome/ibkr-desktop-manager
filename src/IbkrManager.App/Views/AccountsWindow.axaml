@@ -1,0 +1,66 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:IbkrManager.App.ViewModels"
+        x:Class="IbkrManager.App.Views.AccountsWindow"
+        x:DataType="vm:AccountsViewModel"
+        Title="Accounts"
+        Width="560"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="20" Spacing="12">
+    <TextBlock Text="Accounts" FontSize="18" FontWeight="SemiBold" />
+    <TextBlock FontSize="12" Foreground="#888888" TextWrapping="Wrap"
+               Text="Each account is a named credential pair. Auto Login uses the account marked “in use”, which is also the one used when the manager starts." />
+
+    <ListBox ItemsSource="{Binding Accounts}"
+             SelectedItem="{Binding SelectedRow}"
+             Height="126">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:AccountRow">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="{Binding Title}" />
+            <TextBlock Grid.Column="1" Text="{Binding Presence}" FontSize="12" Foreground="#888888" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button Content="New account" Command="{Binding NewCommand}" />
+      <Button Content="Use for Auto Login" Command="{Binding UseCommand}" />
+      <Button Content="{Binding DeleteLabel}" Command="{Binding DeleteCommand}" />
+    </StackPanel>
+
+    <Border Height="1" Background="#33888888" Margin="0,4" />
+
+    <TextBlock Text="{Binding EditorTitle}" FontWeight="SemiBold" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="Name" FontSize="12" Foreground="#888888" />
+      <TextBox Text="{Binding Alias}" Watermark="Main, Paper, Client A…" />
+    </StackPanel>
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="Username" FontSize="12" Foreground="#888888" />
+      <TextBox Text="{Binding Username}" Watermark="IBKR username" />
+    </StackPanel>
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="Password" FontSize="12" Foreground="#888888" />
+      <TextBox Text="{Binding Password}" PasswordChar="●" Watermark="{Binding PasswordWatermark}" />
+    </StackPanel>
+
+    <CheckBox IsChecked="{Binding Remember}" Content="Remember in Windows Credential Manager" />
+    <TextBlock Text="{Binding RememberHint}" FontSize="12" Foreground="#888888" TextWrapping="Wrap" />
+
+    <Border IsVisible="{Binding HasError}" Background="#33E5534B" CornerRadius="6" Padding="8">
+      <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+    </Border>
+
+    <Grid ColumnDefinitions="*,Auto" Margin="0,6,0,0">
+      <Button Content="Close" Command="{Binding CloseCommand}" HorizontalAlignment="Left" />
+      <Button Grid.Column="1" Content="Save" Command="{Binding SaveCommand}" Classes="accent" IsDefault="True" />
+    </Grid>
+  </StackPanel>
+</Window>
