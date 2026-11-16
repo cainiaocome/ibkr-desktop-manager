@@ -3,9 +3,9 @@ using System.Diagnostics;
 namespace IbkrManager.Platform.Windows;
 
 /// <summary>
-/// Windows process control for the IBKR Desktop launcher: finds an already running instance,
-/// launches under a kill-on-close job object, focuses the main window, asks it to close, and
-/// falls back to terminating the whole process tree.
+/// Windows process control for the IBKR Desktop launcher: finds an already running instance, launches,
+/// focuses the main window, asks it to close, and (only for Force Quit) terminates the process tree.
+/// The manager holds no handle that ends the app when it exits.
 /// </summary>
 public sealed class Win32ProcessController : IProcessController, IDisposable
 {
@@ -13,7 +13,6 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
     private readonly Func<string, Process[]> _findProcesses;
     private readonly string _processName;
     private Process? _owned;
-    private JobObject? _job;
     private DateTimeOffset? _startedAt;
     private bool _disposed;
 
@@ -77,23 +76,8 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         _startedAt = DateTimeOffset.Now;
         _log.Info($"Started {installation.FileName} (pid {process.Id})");
 
-        try
-        {
-            _job = JobObject.CreateKillOnClose();
-            if (_job.TryAssign(process))
-            {
-                _log.Info("Assigned IBKR Desktop to a kill-on-close job object");
-            }
-            else
-            {
-                _log.Warn($"Could not assign the job object ({System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.Warn($"Job object unavailable: {ex.Message}. The app may outlive the manager.");
-        }
-
+        // Deliberately no job object and no close-on-exit hook: the manager does not own the app's
+        // lifetime. Closing the manager must leave IBKR Desktop running (see AGENTS.md).
         return Task.CompletedTask;
     }
 
@@ -350,10 +334,8 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
 
         _disposed = true;
 
-        // Closing the job handle terminates the app if the manager goes away.
-        _job?.Dispose();
-        _job = null;
-
+        // Only our own handle is released. The app keeps running: Quit and Force Quit are the only
+        // things that end it, and both are explicit commands.
         _owned?.Dispose();
         _owned = null;
     }

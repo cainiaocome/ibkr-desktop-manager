@@ -109,10 +109,10 @@ Set the login driver to `manual` to make Auto Login report "disabled in Settings
   you do not care about its cleanup. Nothing else in the manager kills the app.
 - **Restart** = Quit + Start. Because Quit never kills, a Restart is refused (with an explanation)
   while the app would not close; Force Quit and then Start instead.
-- Closing the manager window stops the IBKR Desktop instance the manager started. This is deliberate:
-  the app is assigned to a kill-on-close job object so a trading session cannot be left orphaned.
-  If you want the app to outlive the manager, start it yourself — the manager will then attach to it
-  read-only and leave it alone.
+- **Closing the manager never touches IBKR Desktop.** The manager does not own the app's lifetime:
+  close the window and your trading session keeps running. Start the manager again and it attaches to
+  the running instance (it says "attached" in the last-action line) instead of launching a second one.
+  Only `Quit`, `Force Quit` and the app's own window close it.
 
 ## 5. Settings
 
@@ -130,7 +130,7 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | Symptom | Fix |
 |---|---|
 | "IBKR Desktop is not installed" | Install it, or set the executable override in Settings |
-| `Auto Login blocked: … is not set` | Add the value in Credentials, or set the env var and restart the manager |
+| `Auto Login blocked: account 'X' — … is not set` | Add the missing half in Manage accounts |
 | Auto Login reports "login window is still showing" | Wrong credentials, extra dialog on screen, or the app changed its login form → try `manual` |
 | "the app did not receive the typed username" | Another window took focus, a UAC prompt is in front, or the app is elevated while the manager is not. Click into the IBKR window and retry, or run both at the same privilege level |
 | Status stays "Starting…" | The app may be showing a splash window; check the app window and `%LOCALAPPDATA%\IbkrManager\logs` |
@@ -140,11 +140,11 @@ Settings live in `%LOCALAPPDATA%\IbkrManager\settings.json` and never contain se
 | Auto Login types into the wrong field | Tab order changed; use `manual` and report it with the log |
 | SmartScreen warning | Expected for unsigned binaries; verify the SHA-256 from `SHA256SUMS` |
 | Nothing in the tray | v0.1.0 has no tray icon; the window is the app |
-| Manager closed and the trading app disappeared | Kill-on-close job object; see §4 |
+| Manager closed and the trading app disappeared | Fixed in 0.5.0 (the manager no longer owns the app's lifetime); update and re-check §4 |
 
 Logs: `%LOCALAPPDATA%\IbkrManager\logs\manager-YYYY-MM-DD.log`, kept for 7 days, secrets redacted.
 
 ## 7. Uninstall
 
-Delete the extracted folder, then optionally `%LOCALAPPDATA%\IbkrManager` and the stored credential
-(**Credentials → Clear stored**).
+Delete the extracted folder, then optionally `%LOCALAPPDATA%\IbkrManager` and the stored credentials
+(**Manage… → Delete** for each account). IBKR Desktop is unaffected.

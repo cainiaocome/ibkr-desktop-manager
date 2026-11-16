@@ -26,8 +26,8 @@ it is installed, running or stuck at the login screen. This manager gives you:
 
 - live status: installed version, process/PID/uptime, and whether the selected account has both
   credential halves;
-- **Start / Quit / Restart** with a graceful close and a process-tree fallback, plus a kill-on-close
-  job object so an orphaned trading session can never outlive the manager;
+- **Start / Quit / Restart** with a graceful close and an explicit Force Quit — and closing the
+  manager never touches the app, so your trading session keeps running;
 - an explicit **Auto Login** button that launches the app if needed and types the credentials —
   and refuses with a clear error when none are configured;
 - **accounts**: named credential pairs (e.g. *Main*, *Paper*, *Client A*) in Windows Credential
@@ -76,14 +76,15 @@ Account   [ Main ▾ ]  [ Manage… ]        ← this one is used by Auto Login 
 |---|---|
 | Start | Launches IBKR Desktop and waits for the login window |
 | Auto Login | Launches if needed, then types username → Tab → password → Enter |
-| Quit | `WM_CLOSE` first, then kills the process tree if it does not exit in 15 s |
-| Restart | Quit, then Start |
+| Quit | Asks the app to close and answers its own confirmation; never kills it |
+| Force Quit | Terminates the process tree (skips the app's cleanup) |
+| Restart | Quit, then Start — refused while the app would not close |
 | Credentials | Add / replace / clear stored credentials |
 | Settings | Executable path override, env var names, login driver (`auto` or `manual`) |
 | Logs | Opens `%LOCALAPPDATA%\IbkrManager\logs` |
 
-The window refreshes every 2 seconds. Closing the manager also stops the IBKR Desktop instance it
-started (that is the kill-on-close job object doing its job).
+The window refreshes every 2 seconds. **Closing the manager leaves IBKR Desktop running**; start the
+manager again and it attaches to the instance instead of launching a second one.
 
 ## Security model
 

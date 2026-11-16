@@ -60,7 +60,7 @@ the entry point. The whole solution therefore builds and unit-tests on Linux/mac
 Why:
 
 - The hard part is Win32 + UI Automation, and .NET has the best-supported interop there
-  (`FlaUI.UIA3`, raw `SendInput`, Job Objects, `Process.Kill(entireProcessTree)`).
+  (`FlaUI.UIA3`, raw `SendInput`, `Process.Kill(entireProcessTree)` for the explicit Force Quit).
 - One language for core, platform layer, GUI and tests; no Node/Python runtime to ship.
 - Avalonia gives a real GUI today and makes the eventual macOS port a **platform-layer swap
   only** — no GUI rewrite (the requirement explicitly allows macOS later).
@@ -89,7 +89,7 @@ platform interfaces are UI-framework agnostic.
 └───────────────────────────────────────┬──────────────────────────────────────────────────┘
 ┌───────────────────────────────────────▼──────────────────────────────────────────────────┐
 │ IbkrManager.Platform.Windows                                                             │
-│  RegistryAppLocator · Win32ProcessController (Job Object) · UiaLoginDriver               │
+│  RegistryAppLocator · Win32ProcessController (no job object) · UiaLoginDriver             │
 │  EnvSecretProvider (+ CredentialManager provider) · InstanceGuard (named mutex)          │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
      IbkrManager.Platform.Mac  ← later: `open -a`, NSWorkspace, AXUIElement
@@ -130,10 +130,10 @@ it, waits for IBKR's answer, records the outcome and returns. Nothing is injecte
    fall back to known paths; user override wins. Report "not installed" with a download link.
 2. **Guard**: named mutex for single instance; refuse to start a second copy of the app
    (`ntws.exe` already running → attach instead of launching).
-3. **Start**: `Process.Start` with `UseShellExecute=false`, working dir = install dir,
-   the process **assigned to a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** so an
-   orphaned app dies with the manager. Credentials never go into argv (visible in the process
-   list) and the password is never added to the child's environment.
+3. **Start**: `Process.Start` with `UseShellExecute=false`, working dir = install dir. **The manager
+   does not own the app's lifetime**: no job object, no exit hook — closing the manager leaves IBKR
+   Desktop running, and the next manager attaches to it. Credentials never go into argv (visible in
+   the process list) and the password is never added to the child's environment.
 4. **Wait for login window** (timeout ~120 s, configurable), by window class/title from the profile.
 
 **Design rule: the manager is stateless about the app's UI.** It knows whether the executable is
@@ -197,8 +197,7 @@ Therefore:
   anything else, and on `WM_ENDSESSION` stops the timer and cancels in-flight commands.
 - The Avalonia UI thread never runs manager work: ticks and commands are dispatched with `Task.Run`,
   so the message pump is free even if a Win32 call or an accessibility query hangs.
-- The kill-on-close Job Object means the app dies with the manager, so a hung IBKR Desktop cannot hold
-  the session open either.
+- The manager holds no kill-on-close job object: a hung IBKR Desktop is left to the OS at session end.
 - Logging flushes every line, so a forced termination still leaves the last actions on disk.
 
 ## 6. GUI
@@ -327,7 +326,7 @@ Edit "Main"
 
 ```
 src/IbkrManager.Core/            state machine, orchestrator, abstractions, app-profile model
-src/IbkrManager.Platform.Windows/ registry, Win32, Job Object, FlaUI login driver,
+src/IbkrManager.Platform.Windows/ registry, Win32, process control, UI Automation login driver,
                                  env/credential-manager secret providers, dialog-backed store
 src/IbkrManager.App/             Avalonia GUI (MVVM via CommunityToolkit.Mvvm), app icon, tray
 tests/IbkrManager.Core.Tests/    xUnit: state machine, profile parsing, redaction, timeouts
@@ -375,7 +374,7 @@ No secrets are needed for CI; signing secrets are the only ones and live in GitH
 | 1 | Skeleton: solution, Avalonia window, `Core` abstractions, CI green | `dotnet test` passes on `windows-latest` | done |
 | 2 | Read-only status: locator, process/window polling, credential resolution + source, version | GUI shows live state, no actions yet | done |
 | 3 | Accounts dialog + persistence (Credential Manager per account, delete, choose default) | Values survive restart, selection survives restart, delete wipes the secret | done |
-| 4 | Lifecycle: start / quit / restart, Job Object, single instance, logs | Start+quit reliable across 20 cycles, no orphans | done (real-app soak still part of the spike) |
+| 4 | Lifecycle: start / quit / restart, single instance, logs | Start+quit reliable across 20 cycles; closing the manager leaves the app alive | done |
 | 5 | Auto-login button: validation, click-and-type driver, 2FA hand-off | Clicking Auto Login types the credentials, waits for IBKR's verdict; missing creds produce a clear error; failures fall back to manual | done, verified by the real-app end-to-end test |
 | 6 | Release pipeline + settings + signing decision | Tagged release has zip + checksums, CI badge green | done (signing wired, off until a cert exists) |
 
@@ -395,7 +394,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.4.1)
+## 11. Implementation status (v0.5.0)
 
 What shipped, and where it lives:
 
@@ -405,12 +404,12 @@ What shipped, and where it lives:
 | Accounts + redaction | `Core/Accounts.cs` (`AccountService`), `ICredentialStore`, `Secret`, `SecretRedactor`, `RedactingLog` |
 | Profile-driven window matching | `Core/AppProfile.cs` + `Core/app-profile.json` |
 | Install discovery | `Platform.Windows/WindowsAppLocator.cs` + `UninstallRegistry.cs` |
-| Process lifecycle + job object | `Platform.Windows/Win32ProcessController.cs`, `JobObject.cs` |
+| Process lifecycle (manager never ends the app) | `Platform.Windows/Win32ProcessController.cs` |
 | Per-account Credential Manager storage | `Platform.Windows/WindowsCredentialStore.cs` (`IbkrDesktopManager/{id}/{kind}`, legacy read for migration) |
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `AccountsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 181 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 182 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

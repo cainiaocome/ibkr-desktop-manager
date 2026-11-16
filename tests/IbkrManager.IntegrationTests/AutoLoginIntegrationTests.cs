@@ -136,6 +136,80 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
     }
 
     [Fact]
+    public async Task Closing_the_manager_leaves_the_app_running()
+    {
+        // The real "close the manager window" path: App.OnShutdownRequested disposes the platform
+        // layer, which disposes the process controller. That used to drop a kill-on-close job object
+        // and take IBKR Desktop with it.
+        if (!WindowsRequired())
+        {
+            return;
+        }
+
+        var harness = fixture.CreateHarness();
+        var pid = 0;
+        try
+        {
+            await harness.Manager.InitializeAsync();
+            var started = await harness.Manager.StartAsync();
+            pid = started.ProcessId!.Value;
+            Assert.True(IsAlive(pid));
+
+            harness.Process.Dispose();
+
+            // Give Windows a moment: a kill would be immediate, so any delay here is honest.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            output.WriteLine(string.Join(Environment.NewLine, harness.Log.Messages));
+            Assert.True(IsAlive(pid), "closing the manager terminated the app");
+        }
+        finally
+        {
+            Kill(pid);
+        }
+    }
+
+    [Fact]
+    public async Task A_manager_that_starts_after_the_previous_one_closed_attaches()
+    {
+        if (!WindowsRequired())
+        {
+            return;
+        }
+
+        var first = fixture.CreateHarness();
+        var pid = 0;
+        try
+        {
+            await first.Manager.InitializeAsync();
+            pid = (await first.Manager.StartAsync()).ProcessId!.Value;
+
+            // The user closes the manager: the app survives, exactly as the test above asserts.
+            first.Process.Dispose();
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            Assert.True(IsAlive(pid));
+
+            // Starting the manager again attaches to the instance instead of launching a second one.
+            var second = fixture.CreateHarness();
+            try
+            {
+                await second.Manager.InitializeAsync();
+                var state = await second.Manager.StartAsync();
+
+                Assert.Equal(pid, state.ProcessId);
+                Assert.Contains("attached", state.LastAction, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                await second.Manager.QuitAsync(force: true);
+            }
+        }
+        finally
+        {
+            Kill(pid);
+        }
+    }
+
+    [Fact]
     public async Task Start_attaches_to_an_instance_it_did_not_launch()
     {
         if (!WindowsRequired())
@@ -233,6 +307,24 @@ public sealed class AutoLoginIntegrationTests(TestHostFixture fixture, ITestOutp
         finally
         {
             await harness.Manager.QuitAsync(force: true);
+        }
+    }
+
+    private static void Kill(int pid)
+    {
+        if (pid == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Already gone.
         }
     }
 

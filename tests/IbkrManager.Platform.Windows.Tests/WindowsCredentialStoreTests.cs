@@ -50,15 +50,4 @@ public sealed class WindowsCredentialStoreTests
         }
     }
 
-    [Fact]
-    public void Job_object_can_be_created_and_disposed_on_windows()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        using var job = JobObject.CreateKillOnClose();
-        Assert.NotNull(job);
-    }
 }

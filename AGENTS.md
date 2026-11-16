@@ -118,6 +118,22 @@ Facts learned the hard way (do not regress them):
   (`WM_LBUTTONDOWN`, `WM_CHAR`) reach the QML fields. Never "fix" a typing test by weakening it —
   check which strategy the driver log says was used.
 
+## The manager never ends IBKR Desktop by leaving
+
+**Rule: closing the manager (or the manager crashing) must never terminate IBKR Desktop.** The
+manager does not own the app's lifetime: no job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no
+`ProcessExit`/`AppDomain.ProcessExit` handler that kills, no close-on-exit hook. Disposing the
+platform layer releases only the manager's own handles.
+
+The only things that end the app are the explicit commands: `Quit` (asks the app to close) and
+`Force Quit` (terminates the tree). `Restart` refuses rather than kill.
+
+Regression guards: `AppManagerTests.Disposing_the_manager_leaves_the_app_running`,
+`AutoLoginIntegrationTests.Closing_the_manager_leaves_the_app_running` and
+`A_manager_that_starts_after_the_previous_one_closed_attaches` (the last two run on Windows CI against
+the stub host). If a future change needs to track child processes, do not reach for a kill-on-close
+job object again.
+
 ## Conventions
 
 - Credentials must never reach logs, argv, settings files or the launched app's environment:

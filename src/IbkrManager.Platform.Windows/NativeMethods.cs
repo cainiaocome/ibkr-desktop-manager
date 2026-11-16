@@ -1,11 +1,9 @@
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 
 namespace IbkrManager.Platform.Windows;
 
 internal static partial class NativeMethods
 {
-    public const int JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
     public const uint WM_CLOSE = 0x0010;
     public const uint WM_SETTINGCHANGE = 0x001A;
     public const int SW_RESTORE = 9;
@@ -28,49 +26,6 @@ internal static partial class NativeMethods
     public const ushort VK_A = 0x41;
     public const ushort VK_BACK = 0x08;
     public static readonly IntPtr HWND_BROADCAST = new(0xFFFF);
-
-    public enum JobObjectInfoType
-    {
-        AssociateCompletionPortInformation = 7,
-        BasicLimitInformation = 2,
-        ExtendedLimitInformation = 9,
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
-    {
-        public long PerProcessUserTimeLimit;
-        public long PerJobUserTimeLimit;
-        public uint LimitFlags;
-        public UIntPtr MinimumWorkingSetSize;
-        public UIntPtr MaximumWorkingSetSize;
-        public uint ActiveProcessLimit;
-        public UIntPtr Affinity;
-        public uint PriorityClass;
-        public uint SchedulingClass;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct IO_COUNTERS
-    {
-        public ulong ReadOperationCount;
-        public ulong WriteOperationCount;
-        public ulong OtherOperationCount;
-        public ulong ReadTransferCount;
-        public ulong WriteTransferCount;
-        public ulong OtherTransferCount;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-    {
-        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
-        public IO_COUNTERS IoInfo;
-        public UIntPtr ProcessMemoryLimit;
-        public UIntPtr JobMemoryLimit;
-        public UIntPtr PeakProcessMemoryUsed;
-        public UIntPtr PeakJobMemoryUsed;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT
@@ -129,21 +84,6 @@ internal static partial class NativeMethods
         public IntPtr TargetAlias;
         public IntPtr UserName;
     }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern SafeFileHandle CreateJobObject(IntPtr jobAttributes, string? name);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetInformationJobObject(
-        SafeFileHandle job,
-        JobObjectInfoType infoType,
-        IntPtr info,
-        uint infoLength);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
 
     public delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 
