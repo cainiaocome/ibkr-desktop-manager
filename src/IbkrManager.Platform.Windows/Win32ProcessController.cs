@@ -231,6 +231,8 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
             try
             {
                 owned.Kill(entireProcessTree: true);
+                // Kill returns before the process is gone; wait so the reported status is honest.
+                owned.WaitForExit(5000);
                 _log.Warn($"Terminated pid {owned.Id} and its children");
                 return Task.CompletedTask;
             }
@@ -245,6 +247,7 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
             try
             {
                 process.Kill(entireProcessTree: true);
+                process.WaitForExit(5000);
                 _log.Warn($"Terminated pid {process.Id} and its children");
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
