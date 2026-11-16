@@ -212,6 +212,8 @@ public sealed class SendInputLoginDriverTests
 
         public IReadOnlyList<IntPtr> FindWindows() => [];
 
+        public bool IsForeground() => true;
+
         public bool HasVisibleWindow { get; set; }
 
         public bool Focused { get; private set; }

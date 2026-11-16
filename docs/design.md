@@ -136,6 +136,13 @@ it, waits for IBKR's answer, records the outcome and returns. Nothing is injecte
    the process list) and the password is never added to the child's environment.
 4. **Wait for login window** (timeout ~120 s, configurable), by window class/title from the profile.
 
+**Design rule: the manager logs in and nothing else.** Its only interaction with the app is typing the
+login form during an Auto Login click, plus the explicit lifecycle commands. No background inspection,
+no focus changes outside those commands, no `SendInput` keystrokes unless the app owns the foreground
+(`IProcessController.IsForeground`), no clicking in windows that were already on screen, no lifecycle
+coupling (closing the manager leaves the app running), no writes to the app's files, registry keys or
+clipboard. The accepted side effects are documented in `AGENTS.md`.
+
 **Design rule: the manager is stateless about the app's UI.** It knows whether the executable is
 installed and whether the process is running, and it records the outcome of the last Auto Login. It
 does *not* keep a live login/2FA/logged-in state: that needs a window inspection on every tick, which
@@ -394,7 +401,7 @@ IBKR ToS/account-lockout concerns if auto-login retries (hence no retries).
 
 ---
 
-## 11. Implementation status (v0.5.0)
+## 11. Implementation status (v0.6.0)
 
 What shipped, and where it lives:
 
@@ -409,7 +416,7 @@ What shipped, and where it lives:
 | Login drivers | `Platform.Windows/PointerLoginDriver.cs` (`pointer`: click + type, verified) → `UiaLoginDriver.cs` (`uia`: value assignment) → `SendInputLoginDriver.cs` (`sendinput`: blind typing) → `Core/ManualLoginDriver.cs`, chained by `Core/LoginDriverChain.cs` |
 | Login-form / 2FA classification (during Auto Login only) | `Core/UiAutomation.cs` (`UiClassifier`) + `Platform.Windows/UiaSession.cs` |
 | GUI | `App/Views/MainWindow.axaml`, `AccountsWindow.axaml`, `SettingsWindow.axaml` |
-| Tests | 182 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
+| Tests | 183 xUnit tests, including headless Skia renders of all three windows, a Windows integration suite that drives a stub app through the real platform layer, and a real-app suite run by the probe workflow |
 | CI / release | `.github/workflows/ci.yml`, `release.yml` |
 
 Deliberate gaps (also listed in `docs/ibkr-app-notes.md`): tray icon, start-with-Windows,

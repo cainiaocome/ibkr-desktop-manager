@@ -118,21 +118,37 @@ Facts learned the hard way (do not regress them):
   (`WM_LBUTTONDOWN`, `WM_CHAR`) reach the QML fields. Never "fix" a typing test by weakening it —
   check which strategy the driver log says was used.
 
-## The manager never ends IBKR Desktop by leaving
+## The manager logs in and nothing else
 
-**Rule: closing the manager (or the manager crashing) must never terminate IBKR Desktop.** The
-manager does not own the app's lifetime: no job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no
-`ProcessExit`/`AppDomain.ProcessExit` handler that kills, no close-on-exit hook. Disposing the
-platform layer releases only the manager's own handles.
+The manager's single interaction with IBKR Desktop is **typing the login form when the user presses
+Auto Login**. Everything else it does to the app happens only in direct response to a command.
 
-The only things that end the app are the explicit commands: `Quit` (asks the app to close) and
-`Force Quit` (terminates the tree). `Restart` refuses rather than kill.
+Allowed:
 
-Regression guards: `AppManagerTests.Disposing_the_manager_leaves_the_app_running`,
-`AutoLoginIntegrationTests.Closing_the_manager_leaves_the_app_running` and
-`A_manager_that_starts_after_the_previous_one_closed_attaches` (the last two run on Windows CI against
-the stub host). If a future change needs to track child processes, do not reach for a kill-on-close
-job object again.
+- **Auto Login**: UI Automation *reads* (login-form geometry, field values, the outcome of the
+  attempt), real clicks on the two fields and the submit button, and the keystrokes needed for them.
+- **Start / Quit / Force Quit / Restart**: the explicit lifecycle commands. `Start` launches the app,
+  or attaches to an instance that is already running.
+- **Quit** answering the app's own quit confirmation, but only in a window created *after* the close
+  request (`QuitConfirmationWindows`), never in the main window.
+
+Never, under any circumstances:
+
+- background or periodic inspection of the app's windows or accessibility tree — the 2 s tick reads
+  **process state only** (`Tick_only_reads_process_state_and_never_the_window`);
+- changing focus outside those commands (`TryFocusMainWindow` returns immediately when the app already
+  has the foreground);
+- sending `SendInput` keystrokes when the app is not the foreground window: they would be typed into
+  whatever application the user switched to, credentials included. The driver checks
+  `IProcessController.IsForeground()` first and falls back to messages posted to the app's own window;
+- pressing a button in a window that was already on screen when an action started;
+- ending the app when the manager exits (no kill-on-close job object, no `ProcessExit` hook) — see
+  `Disposing_the_manager_leaves_the_app_running` and `Closing_the_manager_leaves_the_app_running`;
+- writing to the app's install directory, its config, the registry, its environment or the clipboard.
+
+Known, accepted side effects of a login attempt: posted messages can interleave with someone typing in
+the app at the same moment (unavoidable), and the login-outcome check reads the main window once a
+second while the attempt is in flight (that is how 2FA and refusals are detected).
 
 ## Conventions
 

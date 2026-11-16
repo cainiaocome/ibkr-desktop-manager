@@ -97,6 +97,23 @@ It is UI automation, not an IBKR API. Consequences:
 
 Set the login driver to `manual` to make Auto Login report "disabled in Settings" and do nothing else.
 
+## 3.1 What the manager touches in IBKR Desktop — and what it never touches
+
+It types the login form when you press **Auto Login**, and it runs the lifecycle commands you press.
+That is all.
+
+- The 2-second refresh reads only process state (running? pid? uptime?); it never inspects the app's
+  window or accessibility tree.
+- Keystrokes are only sent while IBKR Desktop is the foreground window. If you switch to another
+  application mid-login, the manager uses messages addressed to the IBKR window instead of system-wide
+  keystrokes — it will not type your password into another app.
+- It never clicks a dialog that was already on screen when an action started.
+- Closing the manager leaves IBKR Desktop running.
+- It never writes to IBKR's files, registry keys, environment or the clipboard.
+
+While a login attempt is in flight (a few seconds, up to `loginResultTimeoutSeconds`) it reads the app's
+login window about once a second to see whether the login was accepted, refused or needs 2FA.
+
 ## 4. Quit, restart and closing the manager
 
 - **Quit** asks the app to close (`WM_CLOSE`) and waits. If IBKR Desktop puts up its own confirmation —

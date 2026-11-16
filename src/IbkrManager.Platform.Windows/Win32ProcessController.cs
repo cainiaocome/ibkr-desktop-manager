@@ -81,6 +81,18 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
         return Task.CompletedTask;
     }
 
+    public bool IsForeground()
+    {
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero || ProcessId is not { } ours)
+        {
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(foreground, out var owner);
+        return owner != 0 && owner == (uint)ours;
+    }
+
     public bool TryFocusMainWindow()
     {
         var process = Find();
@@ -106,6 +118,12 @@ public sealed class Win32ProcessController : IProcessController, IDisposable
 
         NativeMethods.ShowWindow(handle, NativeMethods.SW_RESTORE);
         var foregroundBefore = NativeMethods.GetForegroundWindow();
+        if (foregroundBefore == handle)
+        {
+            // Already focused: do not touch the input queues of either process for nothing.
+            return true;
+        }
+
         if (NativeMethods.SetForegroundWindow(handle))
         {
             _log.Info($"Focused window 0x{handle.ToInt64():X} (foreground was 0x{foregroundBefore.ToInt64():X})");

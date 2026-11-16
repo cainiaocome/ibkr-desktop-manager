@@ -19,6 +19,13 @@ public interface IProcessController
     /// <summary>Visible top-level windows of the app (used to spot a dialog that appeared later).</summary>
     IReadOnlyList<IntPtr> FindWindows();
 
+    /// <summary>
+    /// True when a window of the app currently has the foreground, i.e. synthetic keystrokes would land
+    /// in it. Anything that types must check this first: otherwise the credentials go to whatever
+    /// application the user switched to.
+    /// </summary>
+    bool IsForeground();
+
     Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default);
 
     bool TryFocusMainWindow();

@@ -307,6 +307,11 @@ public sealed class PointerLoginDriver(
         bool usePosted,
         CancellationToken cancellationToken)
     {
+        if (!EnsureKeystrokesReachTheApp(usePosted))
+        {
+            return false;
+        }
+
         var moved = usePosted ? _posted.KeyPress(NativeMethods.VK_TAB) : _keyboard.SendKeyPress(NativeMethods.VK_TAB);
         if (!moved)
         {
@@ -336,7 +341,35 @@ public sealed class PointerLoginDriver(
         }
 
         await Task.Delay(usePosted ? PostedDelay : ClickDelay, cancellationToken).ConfigureAwait(false);
+        if (!EnsureKeystrokesReachTheApp(usePosted))
+        {
+            return "another application has the foreground, so the credentials would have been typed there.";
+        }
+
         return await ClearAndTypeAsync(index, value, typingDelayMilliseconds, usePosted, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// SendInput goes to the foreground window, whatever it is. Refusing to type unless the app owns the
+    /// foreground is what keeps the manager from leaking credentials into another application when the
+    /// user clicks away mid-login. Posted messages are addressed to the app's own window, so they are
+    /// safe by construction (they can still interleave with the user's typing, which is unavoidable).
+    /// </summary>
+    private bool EnsureKeystrokesReachTheApp(bool usePosted)
+    {
+        if (usePosted || process.IsForeground())
+        {
+            return true;
+        }
+
+        if (process.TryFocusMainWindow() && process.IsForeground())
+        {
+            log.Info("Pointer login: brought IBKR Desktop back to the foreground before typing");
+            return true;
+        }
+
+        log.Warn("Pointer login: IBKR Desktop is not in the foreground; refusing to send keystrokes");
+        return false;
     }
 
     /// <summary>Replaces the focused field's contents with <paramref name="value"/>.</summary>

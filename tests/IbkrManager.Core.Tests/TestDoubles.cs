@@ -47,6 +47,11 @@ internal sealed class FakeProcessController(IClock clock) : IProcessController
 
     public IReadOnlyList<IntPtr> FindWindows() => Windows;
 
+    /// <summary>Whether synthetic keystrokes would land in the app (the driver refuses otherwise).</summary>
+    public bool Foreground { get; set; } = true;
+
+    public bool IsForeground() => Foreground;
+
     public int StartCount { get; private set; }
 
     public int FocusCount { get; private set; }

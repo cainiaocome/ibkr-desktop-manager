@@ -5,7 +5,6 @@ namespace IbkrManager.Platform.Windows;
 internal static partial class NativeMethods
 {
     public const uint WM_CLOSE = 0x0010;
-    public const uint WM_SETTINGCHANGE = 0x001A;
     public const int SW_RESTORE = 9;
     public const uint WM_CHAR = 0x0102;
     public const uint WM_KEYDOWN = 0x0100;
@@ -25,7 +24,6 @@ internal static partial class NativeMethods
     public const ushort VK_CONTROL = 0x11;
     public const ushort VK_A = 0x41;
     public const ushort VK_BACK = 0x08;
-    public static readonly IntPtr HWND_BROADCAST = new(0xFFFF);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT

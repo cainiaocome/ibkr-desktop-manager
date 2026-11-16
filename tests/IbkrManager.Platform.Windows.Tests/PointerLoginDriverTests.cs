@@ -43,6 +43,36 @@ public sealed class PointerLoginDriverTests
     }
 
     [Fact]
+    public async Task Never_uses_sendinput_when_another_application_has_the_foreground()
+    {
+        // SendInput goes to the foreground window, so typing while the user is in another application
+        // would leak the credentials there. The driver falls back to messages posted to the app's own
+        // window instead (and fails outright if those do not reach it).
+        var harness = new Harness(LoginControls());
+        harness.Process.Foreground = false;
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.Empty(harness.Keyboard.Events);
+        Assert.NotEmpty(harness.Posted.Events);
+        Assert.True(result.ReachedTwoFactor, result.Message);
+    }
+
+    [Fact]
+    public async Task Brings_the_app_back_before_typing_instead_of_giving_up()
+    {
+        var harness = new Harness(LoginControls());
+        harness.Process.Foreground = false;
+        harness.Process.FocusSucceeds = true;
+
+        var result = await harness.Driver.LoginAsync(Request(harness.Profile));
+
+        Assert.True(result.ReachedTwoFactor, result.Message);
+        Assert.Equal(1, harness.Process.FocusCalls);
+        Assert.Equal("alice", harness.Ui.Values[0]);
+    }
+
+    [Fact]
     public async Task Uses_sendinput_on_an_interactive_desktop_and_never_posts()
     {
         var harness = new Harness(LoginControls());
@@ -371,9 +401,10 @@ public sealed class PointerLoginDriverTests
             Keyboard = new RecordingKeyboard { Ui = Ui };
             Mouse = new RecordingMouse { Ui = Ui };
             Posted = new RecordingPostedInput { Ui = Ui };
+            Process = new StubProcess();
             Driver = new PointerLoginDriver(
                 Ui,
-                new StubProcess(),
+                Process,
                 NullAppLog.Instance,
                 Keyboard,
                 Mouse,
@@ -398,6 +429,8 @@ public sealed class PointerLoginDriverTests
         };
 
         public bool Interactive { get; init; } = true;
+
+        public StubProcess Process { get; }
 
         public PointerLoginDriver Driver { get; }
     }
@@ -724,6 +757,15 @@ public sealed class PointerLoginDriverTests
 
     private sealed class StubProcess : IProcessController
     {
+        /// <summary>Whether the app owns the foreground (what SendInput would type into).</summary>
+        public bool Foreground { get; set; } = true;
+
+        public bool FocusSucceeds { get; set; }
+
+        public int FocusCalls { get; private set; }
+
+        public bool IsForeground() => Foreground;
+
         public bool IsRunning => true;
 
         public int? ProcessId => 4321;
@@ -741,7 +783,16 @@ public sealed class PointerLoginDriverTests
         public Task StartAsync(AppInstallation installation, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public bool TryFocusMainWindow() => true;
+        public bool TryFocusMainWindow()
+        {
+            FocusCalls++;
+            if (FocusSucceeds)
+            {
+                Foreground = true;
+            }
+
+            return FocusSucceeds;
+        }
 
         public Task<bool> CloseMainWindowAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
